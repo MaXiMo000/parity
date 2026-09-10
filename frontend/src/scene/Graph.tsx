@@ -14,7 +14,7 @@ export function Graph({ nodes, edges, statuses, onSelect }: {
   statuses: Record<string, DriftStatus>
   onSelect: (id: string) => void
 }) {
-  const laidOut = useMemo(() => computeLayout(nodes, edges, statuses), [nodes, edges, statuses])
+  const laidOut = useMemo(() => computeLayout(nodes, edges), [nodes, edges])
 
   return (
     <Canvas camera={{ position: [0, 0, 12], fov: 50 }} dpr={[1, 2]}>
@@ -30,7 +30,7 @@ export function Graph({ nodes, edges, statuses, onSelect }: {
           return <Edge key={`${e.from_node}-${e.to_node}`} from={[a.x, a.y, a.z]} to={[b.x, b.y, b.z]} />
         })}
         {[...laidOut.values()].map((n) => (
-          <Node key={n.id} node={n} onSelect={onSelect} />
+          <Node key={n.id} node={n} status={statuses[n.id] ?? 'unverified_no_schema'} onSelect={onSelect} />
         ))}
       </Bounds>
 

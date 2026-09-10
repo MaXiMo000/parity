@@ -40,7 +40,7 @@ canvas{display:block}
   text-transform:uppercase;padding:4px 10px;border-radius:2px;margin-bottom:20px}
 .dive__status--matched{color:var(--match);border:1px solid var(--match)}
 .dive__status--violated{color:var(--violate);border:1px solid var(--violate)}
-.dive__status--unverified{color:var(--mute);border:1px solid var(--hair)}
+.dive__status--unverified_no_schema,.dive__status--unverified_no_match{color:var(--mute);border:1px solid var(--hair)}
 .dive__label{font-family:var(--mono);font-size:10px;color:var(--mute);
   text-transform:uppercase;margin:16px 0 6px}
 .dive__schema{background:rgba(255,255,255,.03);border-radius:2px;padding:12px;

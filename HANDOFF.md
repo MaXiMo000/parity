@@ -29,7 +29,9 @@ Global Constraints for the exact values).
   real (fake) `violated` result with the real missing-field detail text
   and the node turns red in the graph; Send against `get_task` shows
   `matched` and the node turns green. Escape and backdrop-click both close
-  the panel; focus returns to the graph afterward.
+  the panel; focus returns to whatever was focused before the panel opened
+  (often `<body>`, since `<Canvas>` isn't keyboard-focusable — there's no
+  keyboard path to select a node yet, pointer-only).
 
 ### Run it locally
 

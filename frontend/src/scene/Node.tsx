@@ -1,10 +1,14 @@
 import { useState } from 'react'
-import { nodeColor } from '../lib/severity'
+import { nodeColor, type DriftStatus } from '../lib/severity'
 import type { LaidOutNode } from './layout'
 
-export function Node({ node, onSelect }: { node: LaidOutNode; onSelect: (id: string) => void }) {
+export function Node({ node, status, onSelect }: {
+  node: LaidOutNode
+  status: DriftStatus
+  onSelect: (id: string) => void
+}) {
   const [hovered, setHovered] = useState(false)
-  const { color, emissiveIntensity } = nodeColor(node.status)
+  const { color, emissiveIntensity } = nodeColor(status)
 
   return (
     <mesh

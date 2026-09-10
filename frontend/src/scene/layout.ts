@@ -1,22 +1,16 @@
 // @ts-expect-error — d3-force-3d ships no published types.
 import { forceCenter, forceLink, forceManyBody, forceSimulation, forceX, forceY, forceZ } from 'd3-force-3d'
 import type { Edge, Node } from '../api'
-import type { DriftStatus } from '../lib/severity'
 
 export interface LaidOutNode extends Node {
   x: number
   y: number
   z: number
-  status: DriftStatus
 }
 
 const SETTLE_TICKS = 300
 
-export function computeLayout(
-  nodes: Node[],
-  edges: Edge[],
-  statuses: Record<string, DriftStatus>,
-): Map<string, LaidOutNode> {
+export function computeLayout(nodes: Node[], edges: Edge[]): Map<string, LaidOutNode> {
   const simNodes = nodes.map((n) => ({ ...n }))
   const simLinks = edges.map((e) => ({ source: e.from_node, target: e.to_node }))
 
@@ -33,7 +27,7 @@ export function computeLayout(
 
   const out = new Map<string, LaidOutNode>()
   for (const n of simNodes as (Node & { x: number; y: number; z: number })[]) {
-    out.set(n.id, { ...n, x: n.x, y: n.y, z: n.z, status: statuses[n.id] ?? 'unverified' })
+    out.set(n.id, { ...n, x: n.x, y: n.y, z: n.z })
   }
   return out
 }
