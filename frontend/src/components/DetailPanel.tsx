@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { Node, SendResult } from '../api'
 import type { DriftStatus } from '../lib/severity'
 import { useModalPanel } from '../lib/useModalPanel'
@@ -12,6 +12,11 @@ export function DetailPanel({ node, status, onClose, onSend }: {
   const closeRef = useModalPanel(node !== null, onClose)
   const [result, setResult] = useState<SendResult | null>(null)
   const [sending, setSending] = useState(false)
+
+  useEffect(() => {
+    setResult(null)
+    setSending(false)
+  }, [node?.id])
 
   if (!node) return null
 
