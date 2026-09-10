@@ -22,3 +22,26 @@ canvas{display:block}
 .hud-top > *{pointer-events:auto}
 .brand{font-size:14px;letter-spacing:.08em;text-transform:uppercase;font-weight:700}
 .brand span{color:var(--match)}
+
+.scene-root{position:relative;width:100%;height:100%}
+
+.dive-backdrop{position:fixed;inset:0;z-index:20;
+  background:rgba(5,6,11,.6);backdrop-filter:blur(3px);
+  display:flex;justify-content:flex-end}
+.dive{width:min(420px,92vw);height:100%;background:#0A0C14;
+  border-left:1px solid var(--hair);padding:32px 30px;overflow-y:auto;position:relative}
+.dive__close{position:absolute;top:24px;right:24px;background:transparent;
+  border:1px solid var(--hair);color:var(--paper);font-family:var(--mono);
+  font-size:10px;padding:6px 12px;border-radius:2px;cursor:pointer}
+.dive__close:hover{border-color:var(--match);color:var(--match)}
+.eyebrow{font-family:var(--mono);font-size:11px;color:var(--mute);margin-bottom:6px}
+.dive__title{font-family:var(--disp);font-size:20px;font-weight:700;margin-bottom:10px}
+.dive__status{display:inline-block;font-family:var(--mono);font-size:11px;
+  text-transform:uppercase;padding:4px 10px;border-radius:2px;margin-bottom:20px}
+.dive__status--matched{color:var(--match);border:1px solid var(--match)}
+.dive__status--violated{color:var(--violate);border:1px solid var(--violate)}
+.dive__status--unverified{color:var(--mute);border:1px solid var(--hair)}
+.dive__label{font-family:var(--mono);font-size:10px;color:var(--mute);
+  text-transform:uppercase;margin:16px 0 6px}
+.dive__schema{background:rgba(255,255,255,.03);border-radius:2px;padding:12px;
+  font-family:var(--mono);font-size:11px;color:var(--paper);overflow-x:auto}
