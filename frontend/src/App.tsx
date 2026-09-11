@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import { createWorkspace, getWorkspace, type SendResult, type Workspace } from './api'
 import { DetailPanel } from './components/DetailPanel'
+import { HistoryPanel } from './components/HistoryPanel'
 import { WorkspaceForm } from './components/WorkspaceForm'
 import { WorkspaceList } from './components/WorkspaceList'
 import type { DriftStatus } from './lib/severity'
@@ -13,6 +14,7 @@ export function App() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [showHistory, setShowHistory] = useState(false)
 
   const handleClose = useCallback(() => setSelectedId(null), [])
 
@@ -47,6 +49,11 @@ export function App() {
         <div className="hud-top">
           <div className="brand">parity<span>.</span></div>
           <WorkspaceList onLoad={handleLoad} refreshKey={refreshKey} currentId={workspace?.id ?? null} busy={busy} />
+          {workspace && (
+            <button type="button" className="history-toggle" onClick={() => setShowHistory(true)}>
+              History
+            </button>
+          )}
           <WorkspaceForm onCreate={handleCreate} busy={busy} />
         </div>
 
@@ -60,6 +67,9 @@ export function App() {
         )}
       </div>
       <DetailPanel key={selected?.id ?? 'none'} workspace={workspace} node={selected} status={selectedId ? (statuses[selectedId] ?? 'unverified_no_schema') : 'unverified_no_schema'} onClose={handleClose} onSent={handleSent} />
+      {workspace && showHistory && (
+        <HistoryPanel workspace={workspace} onClose={() => setShowHistory(false)} />
+      )}
     </div>
   )
 }
