@@ -30,7 +30,7 @@ class OpenAPIValidationError(Exception):
     pass
 
 
-def _is_safe_url(url: str) -> bool:
+def is_safe_url(url: str) -> bool:
     """Reject obviously-internal targets before fetching — SPEC.md §7.3's
     same reasoning applied to this phase's own new fetch surface (the
     OpenAPI source URL), not just Phase 2's later request proxy. This is a
@@ -59,7 +59,7 @@ def fetch_spec(source: str) -> dict[str, Any]:
 
     Redirects are followed manually (at most one hop) so an allowed URL
     can't silently redirect to an internal target."""
-    if not _is_safe_url(source):
+    if not is_safe_url(source):
         raise OpenAPIFetchError(f"{source} is not a permitted target")
     try:
         resp = httpx.get(source, timeout=15.0, follow_redirects=False)
@@ -67,7 +67,7 @@ def fetch_spec(source: str) -> dict[str, Any]:
         raise OpenAPIFetchError(f"could not reach {source}: {exc}") from exc
     if resp.is_redirect:
         location = resp.headers.get("location")
-        if not location or not _is_safe_url(location):
+        if not location or not is_safe_url(location):
             raise OpenAPIFetchError(f"{source} redirected to a target that is not permitted")
         try:
             resp = httpx.get(location, timeout=15.0, follow_redirects=False)
