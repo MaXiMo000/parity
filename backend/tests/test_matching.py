@@ -1,0 +1,37 @@
+from app.matching import match_rest_node
+
+NODES = [
+    {"id": "findByStatus", "method": "GET", "path_template": "/pet/findByStatus"},
+    {"id": "findByTags", "method": "GET", "path_template": "/pet/findByTags"},
+    {"id": "getPetById", "method": "GET", "path_template": "/pet/{petId}"},
+    {"id": "addPet", "method": "POST", "path_template": "/pet"},
+]
+
+
+def test_literal_segment_beats_a_template_at_the_same_position():
+    result = match_rest_node(NODES, "GET", "https://api.example.com/api/v3/pet/findByStatus", "/api/v3")
+    assert result["id"] == "findByStatus"
+
+
+def test_a_real_id_matches_the_template_node():
+    result = match_rest_node(NODES, "GET", "https://api.example.com/api/v3/pet/123", "/api/v3")
+    assert result["id"] == "getPetById"
+
+
+def test_matches_by_method_too_not_only_path():
+    result = match_rest_node(NODES, "POST", "https://api.example.com/api/v3/pet", "/api/v3")
+    assert result["id"] == "addPet"
+
+
+def test_no_match_on_segment_count_mismatch():
+    assert match_rest_node(NODES, "GET", "https://api.example.com/api/v3/pet/1/extra", "/api/v3") is None
+
+
+def test_no_match_when_no_node_has_that_method():
+    assert match_rest_node(NODES, "DELETE", "https://api.example.com/api/v3/pet/1", "/api/v3") is None
+
+
+def test_empty_base_path_still_matches_a_request_with_no_prefix():
+    nodes = [{"id": "root", "method": "GET", "path_template": "/pets"}]
+    result = match_rest_node(nodes, "GET", "https://api.example.com/pets", "")
+    assert result["id"] == "root"
