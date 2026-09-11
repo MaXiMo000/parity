@@ -97,6 +97,13 @@ def test_fetch_spec_rejects_a_private_ip_target():
         fetch_spec("http://127.0.0.1:9999/whatever")
 
 
+def test_resolve_safe_ip_rejects_nat64_and_sixtofour_addresses():
+    from app.schema.openapi import _resolve_safe_ip
+
+    assert _resolve_safe_ip("64:ff9b::a00:1") is None  # NAT64, maps to 10.0.0.1
+    assert _resolve_safe_ip("2002:7f00:1::") is None    # 6to4, maps to 127.0.0.1
+
+
 def test_ref_at_the_requestbody_object_level_is_also_resolved():
     spec = {
         "openapi": "3.0.0", "info": {"title": "t", "version": "1"},

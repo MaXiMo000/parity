@@ -33,21 +33,24 @@ class OpenAPIValidationError(Exception):
 def _resolve_safe_ip(hostname: str) -> str | None:
     """Resolves hostname and returns the first candidate IP to pin the
     real connection to, or None if resolution fails or ANY resolved
-    address is not globally routable -- a hostname that round-robins
-    between a safe and an unsafe address must not pass on a lucky first
-    answer. `is_global` (verified 2026-09-11 against the real
-    `ipaddress` stdlib module) correctly subsumes the old
-    is_private/is_loopback/is_link_local/is_reserved checks AND
-    additionally rejects CGNAT (100.64.0.0/10, RFC 6598) -- a real gap
-    the old checks missed, since CGNAT is real internal space at several
-    cloud providers."""
+    address is unsafe -- a hostname that round-robins between a safe and
+    an unsafe address must not pass on a lucky first answer. Rejects: not
+    globally routable (subsumes private/loopback/link-local/reserved/
+    CGNAT), multicast, a 6to4 address embedding a private/loopback IPv4
+    (2002::/16 with a private .sixtofour), and the NAT64 well-known
+    prefix 64:ff9b::/96 (maps to an internal IPv4 address on any NAT64
+    network -- exactly what an IPv6-only cloud subnet often is). All four
+    verified against the real ipaddress module, 2026-09-11."""
     try:
         infos = socket.getaddrinfo(hostname, None)
     except socket.gaierror:
         return None
     ips = [info[4][0] for info in infos]
-    if any(not ipaddress.ip_address(ip).is_global for ip in ips):
-        return None
+    nat64 = ipaddress.ip_network("64:ff9b::/96")
+    for raw in ips:
+        addr = ipaddress.ip_address(raw)
+        if not addr.is_global or addr.is_multicast or getattr(addr, "sixtofour", None) is not None or addr in nat64:
+            return None
     return ips[0]
 
 
@@ -62,9 +65,9 @@ def _build_pinned_request(method: str, url: str, **kwargs: Any) -> httpx.Request
     installed httpx 0.28.1, 2026-09-11) so the request is
     indistinguishable from an ordinary one to the target server. Returns
     None if the URL isn't http(s), has no hostname (e.g. a relative
-    redirect Location -- rejected the same way the old is_safe_url
-    rejected it), or the hostname doesn't resolve to an all-safe address
-    set."""
+    redirect Location -- rejected the same way a relative Location with
+    no hostname is rejected here), or the hostname doesn't resolve to an
+    all-safe address set."""
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         return None
@@ -75,7 +78,7 @@ def _build_pinned_request(method: str, url: str, **kwargs: Any) -> httpx.Request
     if ip is None:
         return None
     pinned_url = httpx.URL(url).copy_with(host=ip)
-    headers = {**(kwargs.pop("headers", None) or {}), "Host": hostname}
+    headers = {**(kwargs.pop("headers", None) or {}), "Host": httpx.URL(url).netloc.decode("ascii")}
     return httpx.Request(method, pinned_url, headers=headers, extensions={"sni_hostname": hostname}, **kwargs)
 
 
@@ -88,24 +91,42 @@ def send_pinned(method: str, url: str, error_cls: type[Exception], **kwargs: Any
     so both modules' fetch surfaces get identical SSRF-pinning behavior,
     not two independently-drifting copies. Raises error_cls (each
     module's own *FetchError) on an unsafe/unresolvable target or a
-    network failure at either hop."""
-    req = _build_pinned_request(method, url, **kwargs)
-    if req is None:
-        raise error_cls(f"{url} is not a permitted target")
+    network failure at either hop.
+
+    Note: any `headers` passed via kwargs are forwarded unchanged to a
+    redirect hop, even a cross-host one. Neither current caller
+    (fetch_spec, fetch_introspection) passes credentials, so this is safe
+    today -- but a future caller that does (e.g. Phase 2's
+    request-execution proxy) must strip sensitive headers before
+    following a redirect through this function, or build its own
+    redirect handling. Do not add auth headers here without addressing
+    this."""
     try:
+        req = _build_pinned_request(method, url, **kwargs)
+        if req is None:
+            raise error_cls(f"{url} is not a permitted target")
         with httpx.Client(timeout=15.0) as client:
             resp = client.send(req, follow_redirects=False)
-    except httpx.HTTPError as exc:
+    except error_cls:
+        raise
+    except Exception as exc:  # noqa: BLE001 -- _build_pinned_request can raise httpx.InvalidURL
+        # (not an httpx.HTTPError subclass) on a malformed URL, and the
+        # actual send can raise httpx.HTTPError on a network failure --
+        # both are fetch-shaped failures from this function's caller's
+        # point of view, so both become a clean error_cls instead of an
+        # uncaught 500.
         raise error_cls(f"could not reach {url}: {exc}") from exc
     if resp.is_redirect:
         location = resp.headers.get("location")
-        redirect_req = _build_pinned_request(method, location, **kwargs) if location else None
-        if redirect_req is None:
-            raise error_cls(f"{url} redirected to a target that is not permitted")
         try:
+            redirect_req = _build_pinned_request(method, location, **kwargs) if location else None
+            if redirect_req is None:
+                raise error_cls(f"{url} redirected to a target that is not permitted")
             with httpx.Client(timeout=15.0) as client:
                 resp = client.send(redirect_req, follow_redirects=False)
-        except httpx.HTTPError as exc:
+        except error_cls:
+            raise
+        except Exception as exc:  # noqa: BLE001 -- same rationale as the first hop above
             raise error_cls(f"could not reach {location}: {exc}") from exc
     return resp
 

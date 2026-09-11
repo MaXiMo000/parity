@@ -49,7 +49,7 @@ export function App() {
       <div className="scene-root">
         <div className="hud-top">
           <div className="brand">parity<span>.</span></div>
-          <WorkspaceList onLoad={handleLoad} refreshKey={refreshKey} currentId={workspace?.id ?? null} />
+          <WorkspaceList onLoad={handleLoad} refreshKey={refreshKey} currentId={workspace?.id ?? null} busy={busy} />
           <WorkspaceForm onCreate={handleCreate} busy={busy} />
         </div>
 

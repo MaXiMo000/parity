@@ -6,10 +6,11 @@ import { listWorkspaces, type WorkspaceSummary } from '../api'
  * persisted workspaces and loads whichever one is picked. Re-fetches
  * whenever `refreshKey` changes (App.tsx bumps it after a successful
  * create) so a brand-new workspace shows up without a page reload. */
-export function WorkspaceList({ onLoad, refreshKey, currentId }: {
+export function WorkspaceList({ onLoad, refreshKey, currentId, busy }: {
   onLoad: (id: string) => void
   refreshKey: number
   currentId: string | null
+  busy: boolean
 }) {
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([])
 
@@ -24,6 +25,7 @@ export function WorkspaceList({ onLoad, refreshKey, currentId }: {
       className="workspace-list"
       value={currentId ?? ''}
       onChange={(e) => { if (e.target.value) onLoad(e.target.value) }}
+      disabled={busy}
       aria-label="Load existing workspace"
     >
       <option value="" disabled>Load existing…</option>

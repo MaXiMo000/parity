@@ -313,6 +313,37 @@ finished §7.3.
     both "Petstore OpenAPI (openapi)" and "Countries GraphQL (graphql)" —
     confirming they're really in Postgres, not component state.
 
+### Known gaps (carried over / still open)
+
+- Carried from Phase 1b: GraphQL nodes still render with no edges in the
+  3D graph (a real type-relationship graph layout for GraphQL mode is
+  SPEC.md §8.3 frontend work, not yet attempted).
+- New from this phase's own final review (documented, not fixed — each
+  with why):
+  - `send_pinned` forwards headers/body unchanged across a redirect hop;
+    safe today since neither caller passes credentials, but Phase 2's
+    request-execution proxy must not reuse it unmodified for
+    authenticated requests without addressing this first (see the
+    docstring note added by this phase's final-review fix).
+  - SPEC.md §9 names a dedicated `app/proxy/ssrf_guard.py` module for the
+    SSRF guard; it currently lives in `app/schema/openapi.py` for
+    schema-parsing convenience. Phase 2 should extract it when building
+    the real request-execution proxy.
+  - The current per-operation `httpx.Client(timeout=15.0)` isn't a true
+    hard wall-clock cap (a slow-drip response can hold a connection close
+    to 15s per hop) and there's no response-size cap — both named
+    explicitly in SPEC.md §7.3 as needed for Phase 2's fuller mitigation.
+  - Pinning to the first resolved address (rather than trying every
+    address `getaddrinfo` returns) means a dual-stack host whose
+    first-returned address happens to be unreachable now fails the fetch
+    outright, where it previously might have succeeded via a later
+    address — an availability tradeoff, not a security one.
+  - The workspace picker degrades silently (renders nothing) if
+    `listWorkspaces()` fails, rather than surfacing an error — acceptable
+    since it degrades to the pre-Phase-1c UI state and the picker is a
+    convenience affordance with a working alternative (re-creating the
+    workspace).
+
 ### Next (Phase 2, SPEC.md §10–11)
 
 Real request execution against both REST and GraphQL targets, through the
