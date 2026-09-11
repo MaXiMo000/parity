@@ -39,7 +39,7 @@ class Workspace(Base):
     name: Mapped[str] = mapped_column(String)
     schema_kind: Mapped[str] = mapped_column(String)  # "openapi" | "graphql"
     schema_source: Mapped[str] = mapped_column(Text)  # the URL, or "pasted"
-    raw_schema: Mapped[dict] = mapped_column(JSONB)
+    raw_schema: Mapped[dict | str] = mapped_column(JSONB)  # dict (OpenAPI/introspection) or str (pasted SDL)
     encrypted_credential: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)

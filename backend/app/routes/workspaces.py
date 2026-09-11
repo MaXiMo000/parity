@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.db import DEFAULT_USER_ID, get_session
 from app.edges import compute_rest_edges
 from app.models import Node, Workspace
+from app.schema.graphql import GraphQLFetchError, GraphQLValidationError, fetch_introspection, parse_graphql
 from app.schema.openapi import OpenAPIFetchError, OpenAPIValidationError, fetch_spec, parse_openapi
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
@@ -22,26 +23,42 @@ def create_workspace(body: dict, session: Session = Depends(get_session)) -> dic
     schema_kind = body.get("schema_kind")
     url = body.get("schema_source_url")
     raw = body.get("raw_schema")
-    if not name or schema_kind != "openapi":
-        raise HTTPException(status_code=422, detail="name and schema_kind='openapi' are required")
+    if not name or schema_kind not in ("openapi", "graphql"):
+        raise HTTPException(status_code=422, detail="name and schema_kind in ('openapi', 'graphql') are required")
     if bool(url) == bool(raw):
         raise HTTPException(status_code=422, detail="exactly one of schema_source_url or raw_schema is required")
 
-    if url:
+    if schema_kind == "openapi":
+        if url:
+            try:
+                spec = fetch_spec(url)
+            except OpenAPIFetchError as exc:
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+        else:
+            spec = raw
         try:
-            spec = fetch_spec(url)
-        except OpenAPIFetchError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            parsed_nodes = parse_openapi(spec)
+        except OpenAPIValidationError as exc:
+            raise HTTPException(status_code=422, detail=f"invalid OpenAPI spec: {exc}") from exc
     else:
-        spec = raw
-
-    try:
-        parsed_nodes = parse_openapi(spec)
-    except OpenAPIValidationError as exc:
-        raise HTTPException(status_code=422, detail=f"invalid OpenAPI spec: {exc}") from exc
+        if url:
+            try:
+                spec = fetch_introspection(url)
+            except GraphQLFetchError as exc:
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+        else:
+            if not isinstance(raw, str):
+                raise HTTPException(
+                    status_code=422, detail="raw_schema for schema_kind='graphql' must be an SDL string"
+                )
+            spec = raw
+        try:
+            parsed_nodes = parse_graphql(spec)
+        except GraphQLValidationError as exc:
+            raise HTTPException(status_code=422, detail=f"invalid GraphQL schema: {exc}") from exc
 
     workspace = Workspace(
-        user_id=DEFAULT_USER_ID, name=name, schema_kind="openapi",
+        user_id=DEFAULT_USER_ID, name=name, schema_kind=schema_kind,
         schema_source=url or "pasted", raw_schema=spec,
     )
     session.add(workspace)
