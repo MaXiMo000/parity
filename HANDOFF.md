@@ -134,3 +134,85 @@ Phase 1b will add GraphQL SDL + introspection parsing (same shape: fetch URL,
 validate, extract operation nodes, store). Phase 2 will implement honest
 request-sending against real remote APIs and state tracking (node → verified
 or error). Phase 3+ will add user accounts, OAuth, and per-user workspaces.
+
+## 2026-09-11: Phase 1b: GraphQL Schema Parsing — done, live-verified
+
+**What/Why**: Phase 1a covered OpenAPI only; SPEC.md's Phase 1 scope also
+requires GraphQL. This phase adds the second schema kind end-to-end — real
+introspection/SDL parsing, a `schema_kind` selector on workspace creation,
+and a frontend detail panel that renders GraphQL fields correctly instead
+of the OpenAPI-shaped `null · null` placeholder.
+
+**What was built**: `fetch_introspection` (live GraphQL endpoints, via the
+standard introspection query) and `parse_graphql` (raw SDL text), both built
+on `graphql-core`, extract one `Node` per field on the schema's `Query` and
+`Mutation` root types — `Subscription` fields are explicitly out of scope
+for v1. `POST /api/workspaces` accepts `schema_kind: "graphql"` alongside
+the existing `"openapi"` and routes to the GraphQL parser. The frontend
+gained a kind selector (OpenAPI / GraphQL) on the create-workspace form,
+and the node detail panel now derives its eyebrow/title from the node's
+real `kind`/`name` (e.g. `Query field` / `country`) instead of assuming
+OpenAPI's `method`/`path` shape, with the field's declared argument and
+response type descriptors shown as JSON.
+
+### Known simplifications
+
+- **No GraphQL edges yet**: nodes are extracted per root-type field with no
+  inter-node relationship graph — the 3D view renders them as an
+  unconnected cluster (no visible edges), unlike OpenAPI's `$ref`-derived
+  edges. A real type-relationship layout for GraphQL mode is SPEC.md §8.3
+  frontend work, not attempted in this phase.
+- **`Subscription` out of scope**: only `Query` and `Mutation` root-type
+  fields become nodes; real-time subscription operations are not
+  represented at all in v1.
+- **No request-sending yet**: same honest 501 from Phase 1a — GraphQL nodes
+  are just as `unverified` as OpenAPI ones until Phase 2 fires real
+  requests.
+
+### Verified
+
+- Backend: `cd backend && .venv/bin/python -m pytest -q` — **32 passed**
+  (up from Phase 1a's 21: Task 1's 7 new GraphQL-parsing tests + Task 2's 4
+  new route/integration tests).
+- Frontend: `cd frontend && npx vitest run` — **7 passed** across 3 test
+  files (up from Phase 1a's 5: Task 3's 2 new `nodeLabel` tests covering
+  the GraphQL-shaped detail-panel title/eyebrow derivation).
+- **Live-verified in a real browser** (backend on `:8123` against real
+  Postgres via `docker compose` + `alembic upgrade head`, frontend
+  `npm run dev` on `:5173`, driven with an actual browser, not simulated):
+  - Created a workspace named "Countries GraphQL", kind `GraphQL`, URL
+    `https://countries.trevorblades.com/graphql` (a real public GraphQL
+    API). Backend fetched, introspected, and persisted **6 real nodes**
+    with no errors (`POST /api/workspaces` → 201, `GET
+    /api/workspaces/{id}` → 200, confirmed 6 nodes via the API response).
+  - The 3D graph rendered exactly 6 nodes, clustered with no visible edges
+    — the stated, known v1 limitation above, not a bug.
+  - Clicked a node (`country`, one of the schema's `Query` fields) and the
+    detail panel opened showing `Query field` as the eyebrow and `country`
+    as the title (not `null · null`), with its real declared argument
+    (`code: ID!`) and response type (`Country`, nullable) descriptors
+    rendered as JSON.
+  - Clicked Send on that node and got the honest, unchanged `501`:
+    `{"detail":"real request execution arrives in Phase 2 (SPEC.md
+    §7.3/§10)"}`.
+  - **Regression-checked the OpenAPI path**: created a second workspace,
+    kind `OpenAPI`, URL `https://petstore3.swagger.io/api/v3/openapi.json`.
+    Backend responded 201/200 with no errors and persisted 19 nodes + 16
+    edges — matching Phase 1a's known result exactly, confirming the
+    GraphQL work didn't regress OpenAPI parsing.
+
+### Known gap for Phase 2 (carried over / still open)
+
+- No workspace-list/picker UI yet — unchanged from Phase 1a. Every
+  persisted workspace (OpenAPI or GraphQL) is still only reachable by
+  re-creating it.
+- GraphQL nodes render with no edges — a real type-relationship graph
+  layout for GraphQL mode (SPEC.md §8.3) is frontend work not attempted in
+  this phase.
+
+### Next (Phase 2, SPEC.md §10–11)
+
+Real request execution against both REST and GraphQL targets, through a
+full SSRF-hardened proxy, and real drift-checking (comparing live response
+shapes against each node's declared schema) — replacing the honest 501
+with actual verified/violated states.
