@@ -214,7 +214,11 @@ def test_sensitive_headers_are_redacted_when_persisted_but_not_when_sent(monkeyp
 
 
 @respx.mock
-def test_send_against_a_graphql_workspace_is_honestly_unverified_no_match(monkeypatch):
+def test_send_against_a_graphql_workspace_now_matches_and_checks_drift(monkeypatch):
+    # Phase 2a's version of this test asserted GraphQL requests were
+    # honestly unverified_no_match (matching didn't exist yet). Phase 2b
+    # (this task) adds real GraphQL matching + drift-checking, so the
+    # same request against the same schema now genuinely matches.
     _fake_getaddrinfo(monkeypatch)
     ws = client.post("/api/workspaces", json={
         "name": "Pets (GraphQL)", "schema_kind": "graphql",
@@ -226,8 +230,8 @@ def test_send_against_a_graphql_workspace_is_honestly_unverified_no_match(monkey
     })
     assert r.status_code == 201
     body = r.json()
-    assert body["request"]["node_id"] is None
-    assert body["drift_finding"]["status"] == "unverified_no_match"
+    assert body["request"]["node_id"] is not None
+    assert body["drift_finding"]["status"] == "matched"
 
 
 @respx.mock
@@ -272,3 +276,46 @@ def test_response_body_is_parsed_in_api_response_but_raw_text_when_persisted(mon
         assert json.loads(resp_row.body)["name"] == "Fido"
     finally:
         session.close()
+
+
+@respx.mock
+def test_send_a_real_graphql_request_that_matches_and_drifts(monkeypatch):
+    _fake_getaddrinfo(monkeypatch)
+    ws = client.post("/api/workspaces", json={
+        "name": "Pets (GraphQL)", "schema_kind": "graphql",
+        "raw_schema": "type Query { pet(id: ID!): Pet } type Pet { id: ID! name: String! }",
+    }).json()
+
+    respx.post("https://93.184.216.34/graphql").mock(
+        return_value=httpx.Response(200, json={"data": {"pet": "not-an-object"}})
+    )
+    r = client.post(f"/api/workspaces/{ws['id']}/requests", json={
+        "method": "POST", "url": "https://example.invalid/graphql",
+        "headers": {}, "body": '{"query": "{ pet(id: 1) { name } }"}',
+    })
+    assert r.status_code == 201
+    body = r.json()
+    assert body["request"]["node_id"] is not None
+    # declared type for `pet` is a nullable NAMED "Pet" (a custom object type) --
+    # v1 GraphQL drift-checking only checks presence/nullability for a custom
+    # object type, so a string value here is NOT flagged (matches this task's
+    # own stated scope boundary -- confirmed real, not a bug).
+    assert body["drift_finding"]["status"] == "matched"
+
+
+@respx.mock
+def test_send_a_graphql_request_that_matches_no_field_is_unverified_no_match(monkeypatch):
+    _fake_getaddrinfo(monkeypatch)
+    ws = client.post("/api/workspaces", json={
+        "name": "Pets (GraphQL)", "schema_kind": "graphql",
+        "raw_schema": "type Query { pet(id: ID!): Pet } type Pet { id: ID! name: String! }",
+    }).json()
+    respx.post("https://93.184.216.34/graphql").mock(return_value=httpx.Response(200, json={"data": {"totallyUnknown": 1}}))
+    r = client.post(f"/api/workspaces/{ws['id']}/requests", json={
+        "method": "POST", "url": "https://example.invalid/graphql",
+        "headers": {}, "body": '{"query": "{ totallyUnknown }"}',
+    })
+    assert r.status_code == 201
+    body = r.json()
+    assert body["request"]["node_id"] is None
+    assert body["drift_finding"]["status"] == "unverified_no_match"

@@ -35,3 +35,52 @@ def test_empty_base_path_still_matches_a_request_with_no_prefix():
     nodes = [{"id": "root", "method": "GET", "path_template": "/pets"}]
     result = match_rest_node(nodes, "GET", "https://api.example.com/pets", "")
     assert result["id"] == "root"
+
+
+from app.matching import match_graphql_node
+
+GRAPHQL_NODES = [
+    {"id": "queryPet", "type_name": "Query", "field_name": "pet"},
+    {"id": "queryPets", "type_name": "Query", "field_name": "pets"},
+    {"id": "mutationAddPet", "type_name": "Mutation", "field_name": "addPet"},
+]
+
+
+def test_matches_a_real_query_by_operation_and_field():
+    import json
+    body = json.dumps({"query": "{ pet(id: 1) { name } }"})
+    result = match_graphql_node(GRAPHQL_NODES, body)
+    assert result["id"] == "queryPet"
+
+
+def test_matches_an_explicit_mutation():
+    import json
+    body = json.dumps({"query": "mutation { addPet(name: \"Rex\") { id } }"})
+    result = match_graphql_node(GRAPHQL_NODES, body)
+    assert result["id"] == "mutationAddPet"
+
+
+def test_no_match_when_the_field_is_unknown():
+    import json
+    body = json.dumps({"query": "{ totallyUnknownField }"})
+    assert match_graphql_node(GRAPHQL_NODES, body) is None
+
+
+def test_no_match_on_malformed_graphql():
+    import json
+    body = json.dumps({"query": "not valid graphql {{{"})
+    assert match_graphql_node(GRAPHQL_NODES, body) is None
+
+
+def test_no_match_when_body_is_not_json():
+    assert match_graphql_node(GRAPHQL_NODES, "not json at all") is None
+
+
+def test_no_match_when_body_has_no_query_field():
+    import json
+    assert match_graphql_node(GRAPHQL_NODES, json.dumps({"notQuery": "x"})) is None
+
+
+def test_no_match_when_body_is_empty():
+    assert match_graphql_node(GRAPHQL_NODES, None) is None
+    assert match_graphql_node(GRAPHQL_NODES, "") is None

@@ -1,10 +1,8 @@
 """Real request execution (SPEC.md §6 steps 4-8, §7.6): fires a real
-request through the SSRF-guarded proxy, matches it to a known REST Node
-(GraphQL matching arrives in Phase 2b -- until then a GraphQL workspace's
-requests are honestly unverified_no_match, never guessed), validates the
-real response against that node's declared schema, and persists
-Request/Response/DriftFinding with headers redacted before storage.
-Replaces Phase 0/1's honest 501 entirely."""
+request through the SSRF-guarded proxy, matches it to a known REST or
+GraphQL Node, validates the real response against that node's declared
+schema, and persists Request/Response/DriftFinding with headers redacted
+before storage. Replaces Phase 0/1's honest 501 entirely."""
 
 from __future__ import annotations
 
@@ -15,8 +13,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db import get_session
+from app.drift.graphql import check_graphql_drift
 from app.drift.rest import check_rest_drift
-from app.matching import match_rest_node
+from app.matching import match_graphql_node, match_rest_node
 from app.models import DriftFinding, Node, Request, Response, Workspace
 from app.proxy.client import ProxyError, fire_request
 from app.redact import redact_headers
@@ -62,6 +61,14 @@ def send_request(workspace_id: str, body: dict, session: Session = Depends(get_s
         matched = match_rest_node(node_dicts, method, url, workspace.base_path)
         if matched:
             node = session.get(Node, matched["id"])
+    elif workspace.schema_kind == "graphql":
+        graphql_node_dicts = [
+            {"id": n.id, "type_name": n.type_name, "field_name": n.field_name}
+            for n in workspace.nodes
+        ]
+        graphql_matched = match_graphql_node(graphql_node_dicts, req_body)
+        if graphql_matched:
+            node = session.get(Node, graphql_matched["id"])
 
     request_row = Request(
         workspace_id=workspace.id, node_id=node.id if node else None,
@@ -83,6 +90,8 @@ def send_request(workspace_id: str, body: dict, session: Session = Depends(get_s
             status, detail = "unverified_no_schema", "204 No Content has no body to validate against a declared schema"
         elif not (200 <= resp.status_code < 300):
             status, detail = "unverified_no_schema", f"non-2xx response ({resp.status_code}); only 2xx response schemas are declared (SPEC.md §7.2)"
+        elif node.kind == "graphql_field":
+            status, detail = check_graphql_drift(node.declared_response_schema, resp.text)
         else:
             status, detail = check_rest_drift(node.declared_response_schema, resp.text)
     else:

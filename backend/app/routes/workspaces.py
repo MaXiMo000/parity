@@ -102,7 +102,7 @@ def get_workspace(workspace_id: str, session: Session = Depends(get_session)) ->
 
     return {
         "id": workspace.id, "name": workspace.name, "schema_kind": workspace.schema_kind,
-        "base_path": workspace.base_path,
+        "base_path": workspace.base_path, "schema_source": workspace.schema_source,
         "nodes": node_dicts,
         "edges": [{"from_node": a, "to_node": b} for a, b in edges],
     }

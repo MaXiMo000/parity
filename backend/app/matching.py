@@ -8,7 +8,10 @@ meant for /pet/findByStatus)."""
 
 from __future__ import annotations
 
+import json
 from urllib.parse import urlparse
+
+from graphql import GraphQLSyntaxError, OperationDefinitionNode, parse
 
 
 def match_rest_node(nodes: list[dict], method: str, url: str, base_path: str) -> dict | None:
@@ -49,3 +52,46 @@ def match_rest_node(nodes: list[dict], method: str, url: str, base_path: str) ->
             best = node
             best_score = score
     return best
+
+
+def match_graphql_node(nodes: list[dict], request_body_text: str | None) -> dict | None:
+    """Parses the real GraphQL-over-HTTP request body (the standard JSON
+    envelope: {"query": "...", "variables": {...}}) and matches its
+    operation type + first top-level selected field to a Node (SPEC.md
+    §6 step 6, GraphQL side). `nodes` are GraphQL node dicts carrying at
+    least `id`, `type_name`, `field_name`. Returns None -- never a guess
+    -- if the body isn't valid JSON, has no string "query" field, the
+    query doesn't parse as valid GraphQL, the document has no real
+    operation definition, or no node matches. v1 scope: only the FIRST
+    operation definition and its FIRST top-level field selection are
+    considered (SPEC.md's own stated simplification for the common
+    single-operation, single-field case)."""
+    if not request_body_text:
+        return None
+    try:
+        envelope = json.loads(request_body_text)
+    except ValueError:
+        return None
+    query_text = envelope.get("query") if isinstance(envelope, dict) else None
+    if not isinstance(query_text, str):
+        return None
+    try:
+        document = parse(query_text)
+    except GraphQLSyntaxError:
+        return None
+    for definition in document.definitions:
+        if not isinstance(definition, OperationDefinitionNode):
+            continue
+        type_name = definition.operation.value.capitalize()  # "query" -> "Query", "mutation" -> "Mutation"
+        if not definition.selection_set.selections:
+            return None
+        first_selection = definition.selection_set.selections[0]
+        field_name_node = getattr(first_selection, "name", None)
+        if field_name_node is None:
+            return None
+        field_name = field_name_node.value
+        for node in nodes:
+            if node.get("type_name") == type_name and node.get("field_name") == field_name:
+                return node
+        return None
+    return None

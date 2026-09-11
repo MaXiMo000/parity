@@ -77,6 +77,7 @@ def test_list_and_get_real_workspace():
     got = client.get(f"/api/workspaces/{created['id']}").json()
     assert got["name"] == "Petstore"
     assert got["base_path"] == "/api/v3"  # the real Petstore fixture's servers[0].url
+    assert got["schema_source"] == "pasted"  # this test creates the workspace via raw_schema, not a URL
     assert len(got["nodes"]) == created["node_count"]
     assert len(got["edges"]) > 0
     node_ids = {n["id"] for n in got["nodes"]}
