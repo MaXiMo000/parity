@@ -17,7 +17,7 @@ from graphql import (
     get_introspection_query,
 )
 
-from app.schema.openapi import send_pinned
+from app.proxy.ssrf_guard import send_pinned
 
 _ROOT_TYPES = ("Query", "Mutation")
 
