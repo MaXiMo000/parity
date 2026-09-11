@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.db import SessionLocal, ensure_default_user
 from app.routes.workspaces import router as workspaces_router
 from app.routes.requests import router as requests_router
 
@@ -15,6 +16,15 @@ app.add_middleware(
 
 app.include_router(workspaces_router)
 app.include_router(requests_router)
+
+
+@app.on_event("startup")
+def on_startup() -> None:
+    session = SessionLocal()
+    try:
+        ensure_default_user(session)
+    finally:
+        session.close()
 
 
 @app.get("/health")
