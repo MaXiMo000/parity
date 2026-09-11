@@ -56,3 +56,13 @@ def test_rejects_input_that_does_not_start_with_curl():
 def test_rejects_a_command_with_no_url():
     with pytest.raises(CurlParseError):
         parse_curl("curl -X GET")
+
+
+def test_a_header_and_a_derived_auth_header_do_not_collide_by_case():
+    result = parse_curl("curl -u user:pass -H 'authorization: Bearer abc' 'https://api.example.com/x'")
+    assert result["headers"] == {"authorization": "Bearer abc"}
+
+
+def test_a_header_and_a_derived_cookie_header_do_not_collide_by_case():
+    result = parse_curl("curl -b 'session=xyz' -H 'cookie: existing=1' 'https://api.example.com/x'")
+    assert result["headers"] == {"cookie": "existing=1"}

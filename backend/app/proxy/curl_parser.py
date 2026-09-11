@@ -20,6 +20,19 @@ class CurlParseError(Exception):
     pass
 
 
+def _set_header(headers: dict[str, str], key: str, value: str) -> None:
+    """Sets headers[key] = value, but reuses an existing key that matches
+    case-insensitively -- real HTTP header names are case-insensitive, so
+    a dict keyed by exact string would otherwise let e.g. a `-H
+    'authorization: ...'` and a `-u user:pass`-derived `Authorization`
+    header collide as two separate keys instead of one."""
+    for existing in headers:
+        if existing.lower() == key.lower():
+            headers[existing] = value
+            return
+    headers[key] = value
+
+
 def parse_curl(curl_command: str) -> dict[str, Any]:
     """Returns {"method": str, "url": str, "headers": dict[str, str],
     "body": str | None}. Anything outside the supported flag set is
@@ -53,7 +66,7 @@ def parse_curl(curl_command: str) -> dict[str, Any]:
             i += 1
             if i < len(tokens):
                 key, _, value = tokens[i].partition(":")
-                headers[key.strip()] = value.strip()
+                _set_header(headers, key.strip(), value.strip())
         elif tok in ("-d", "--data", "--data-raw", "--data-binary"):
             i += 1
             if i < len(tokens):
@@ -82,9 +95,9 @@ def parse_curl(curl_command: str) -> dict[str, Any]:
         method = method or "GET"
     method = (method or ("POST" if body else "GET")).upper()
 
-    if cookie_parts:
-        headers.setdefault("Cookie", "; ".join(cookie_parts))
-    if user and "Authorization" not in headers:
+    if cookie_parts and not any(h.lower() == "cookie" for h in headers):
+        headers["Cookie"] = "; ".join(cookie_parts)
+    if user and not any(h.lower() == "authorization" for h in headers):
         headers["Authorization"] = "Basic " + base64.b64encode(user.encode()).decode()
 
     return {"method": method, "url": url, "headers": headers, "body": body}
