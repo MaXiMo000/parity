@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { createWorkspace, getWorkspace, sendRequest, type Workspace } from './api'
+import { createWorkspace, getWorkspace, type SendResult, type Workspace } from './api'
 import { DetailPanel } from './components/DetailPanel'
 import { WorkspaceForm } from './components/WorkspaceForm'
 import { WorkspaceList } from './components/WorkspaceList'
@@ -35,11 +35,8 @@ export function App() {
       .finally(() => setBusy(false))
   }
 
-  async function handleSend(nodeId: string) {
-    if (!workspace) throw new Error('no workspace loaded')
-    const result = await sendRequest(workspace.id, nodeId)
+  function handleSent(nodeId: string, result: SendResult) {
     setStatuses((prev) => ({ ...prev, [nodeId]: result.drift_finding.status }))
-    return result
   }
 
   const selected = workspace?.nodes.find((n) => n.id === selectedId) ?? null
@@ -62,7 +59,7 @@ export function App() {
           <Graph nodes={workspace.nodes} edges={workspace.edges} statuses={statuses} onSelect={setSelectedId} />
         )}
       </div>
-      <DetailPanel node={selected} status={selectedId ? (statuses[selectedId] ?? 'unverified_no_schema') : 'unverified_no_schema'} onClose={handleClose} onSend={handleSend} />
+      <DetailPanel workspace={workspace} node={selected} status={selectedId ? (statuses[selectedId] ?? 'unverified_no_schema') : 'unverified_no_schema'} onClose={handleClose} onSent={handleSent} />
     </div>
   )
 }

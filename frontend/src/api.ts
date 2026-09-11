@@ -1,3 +1,5 @@
+import type { DriftStatus } from './lib/severity'
+
 export interface Node {
   id: string
   kind: 'rest_operation' | 'graphql_field'
@@ -20,6 +22,8 @@ export interface Workspace {
   id: string
   name: string
   schema_kind: 'openapi' | 'graphql'
+  base_path: string
+  schema_source: string
   nodes: Node[]
   edges: Edge[]
 }
@@ -31,9 +35,31 @@ export interface WorkspaceSummary {
 }
 
 export interface SendResult {
-  request: { node_id: string; method: string; url: string }
-  response: { status_code: number; body: unknown }
-  drift_finding: { status: 'matched' | 'violated'; detail: string }
+  request: { id: string; node_id: string | null; method: string; url: string }
+  response: { id: string; status_code: number; body: unknown; latency_ms: number }
+  drift_finding: { id: string; status: DriftStatus; detail: string | null }
+}
+
+export interface CurlParseResult {
+  method: string
+  url: string
+  headers: Record<string, string>
+  body: string | null
+}
+
+export interface NodeHistoryEntry {
+  id: string
+  status: DriftStatus
+  detail: string | null
+  created_at: string
+}
+
+export interface RequestHistoryEntry {
+  id: string
+  node_id: string | null
+  method: string
+  url: string
+  sent_at: string
 }
 
 async function json<T>(res: Response): Promise<T> {
@@ -68,10 +94,34 @@ export function getWorkspace(id: string): Promise<Workspace> {
   return fetch(`/api/workspaces/${encodeURIComponent(id)}`).then((res) => json<Workspace>(res))
 }
 
-export function sendRequest(workspaceId: string, nodeId: string): Promise<SendResult> {
+export function sendRequest(
+  workspaceId: string,
+  method: string,
+  url: string,
+  headers: Record<string, string>,
+  body: string | null,
+): Promise<SendResult> {
   return fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/requests`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ node_id: nodeId }),
+    body: JSON.stringify({ method, url, headers, body }),
   }).then((res) => json<SendResult>(res))
+}
+
+export function curlParse(curl: string): Promise<CurlParseResult> {
+  return fetch('/api/curl-parse', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ curl }),
+  }).then((res) => json<CurlParseResult>(res))
+}
+
+export function getNodeHistory(workspaceId: string, nodeId: string): Promise<NodeHistoryEntry[]> {
+  return fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/nodes/${encodeURIComponent(nodeId)}/history`)
+    .then((res) => json<NodeHistoryEntry[]>(res))
+}
+
+export function getWorkspaceRequests(workspaceId: string): Promise<RequestHistoryEntry[]> {
+  return fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/requests`)
+    .then((res) => json<RequestHistoryEntry[]>(res))
 }
