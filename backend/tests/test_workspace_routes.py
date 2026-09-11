@@ -16,7 +16,7 @@ FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "petstore-openapi.jso
 def test_create_workspace_from_a_real_url(monkeypatch):
     # "example.invalid" is RFC 2606 reserved and never actually resolves --
     # respx mocks the HTTP layer but not DNS, so fake a public-IP resolution
-    # for our own pre-fetch safety check (app/schema/openapi.py's _is_safe_url).
+    # for our own pre-fetch safety check (app/schema/openapi.py's is_safe_url).
     monkeypatch.setattr(
         socket, "getaddrinfo",
         lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],

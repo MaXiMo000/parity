@@ -59,6 +59,8 @@ def fetch_introspection(source: str) -> dict[str, Any]:
         payload = resp.json()
     except ValueError as exc:
         raise GraphQLFetchError(f"{source} did not return valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise GraphQLFetchError(f"{source} did not return a JSON object")
     if payload.get("errors"):
         raise GraphQLFetchError(f"{source} returned GraphQL errors: {payload['errors']}")
     data = payload.get("data")

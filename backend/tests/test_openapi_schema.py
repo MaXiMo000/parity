@@ -64,7 +64,7 @@ def test_invalid_spec_raises_validation_error():
 def test_fetch_spec_real_http_get(monkeypatch):
     # "example.invalid" is RFC 2606 reserved and never actually resolves --
     # respx mocks the HTTP layer but not DNS, so fake a public-IP resolution
-    # for our own pre-fetch safety check (app/schema/openapi.py's _is_safe_url).
+    # for our own pre-fetch safety check (app/schema/openapi.py's is_safe_url).
     monkeypatch.setattr(
         socket, "getaddrinfo",
         lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],

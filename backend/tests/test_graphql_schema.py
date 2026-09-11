@@ -111,3 +111,16 @@ def test_fetch_introspection_graphql_errors_raise(monkeypatch):
     )
     with pytest.raises(GraphQLFetchError):
         fetch_introspection("https://example.invalid/graphql")
+
+
+@respx.mock
+def test_fetch_introspection_rejects_a_non_object_json_response(monkeypatch):
+    monkeypatch.setattr(
+        socket, "getaddrinfo",
+        lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],
+    )
+    respx.post("https://example.invalid/graphql").mock(
+        return_value=httpx.Response(200, json=["not", "an", "object"])
+    )
+    with pytest.raises(GraphQLFetchError):
+        fetch_introspection("https://example.invalid/graphql")

@@ -62,7 +62,7 @@ nodes (filtered to first-2xx-only response schemas for simplicity), and stores
 in the database. The `POST /api/workspaces/{id}/requests` route now honestly
 returns 501 (Not Implemented) instead of Phase 0's fake `violated`/`matched`
 result. Live-verified against `https://petstore3.swagger.io/api/v3/openapi.json`:
-real 19 operation nodes + 16 inter-operation reference edges render in 3D,
+real 19 operation nodes + 16 inter-operation path-template-derived edges render in 3D,
 schemas in the detail panel are the real resolved `$ref`-flattened inline
 schemas, Send button shows the honest 501. (GraphQL parsing — Phase 1b — is
 **not** in this release; SPEC.md Phase 1 covers both OpenAPI and GraphQL, but
@@ -159,8 +159,12 @@ response type descriptors shown as JSON.
 
 - **No GraphQL edges yet**: nodes are extracted per root-type field with no
   inter-node relationship graph — the 3D view renders them as an
-  unconnected cluster (no visible edges), unlike OpenAPI's `$ref`-derived
-  edges. A real type-relationship layout for GraphQL mode is SPEC.md §8.3
+  unconnected cluster (no visible edges), unlike OpenAPI's
+  path-template-derived edges (see `app/edges.py`'s docstring: edges are
+  computed purely from `path_template` — grouped by first path segment,
+  sorted by path length, chained consecutively — never from `$ref`
+  resolution, which only ever affects a node's declared schemas, not
+  edges). A real type-relationship layout for GraphQL mode is SPEC.md §8.3
   frontend work, not attempted in this phase.
 - **`Subscription` out of scope**: only `Query` and `Mutation` root-type
   fields become nodes; real-time subscription operations are not
@@ -168,6 +172,20 @@ response type descriptors shown as JSON.
 - **No request-sending yet**: same honest 501 from Phase 1a — GraphQL nodes
   are just as `unverified` as OpenAPI ones until Phase 2 fires real
   requests.
+- **`declared_request_schema`/`declared_response_schema` hold different
+  shapes depending on `node.kind`**: for REST nodes (`kind:
+  "rest_operation"`) these are real JSON Schema, with every `$ref` resolved
+  inline. For GraphQL nodes (`kind: "graphql_field"`) they are not JSON
+  Schema at all — `declared_request_schema` is `{argName: typeDescriptor}`
+  (a map of the field's arguments, not a schema object), and
+  `declared_response_schema` is a single type descriptor:
+  `{"kind": "NAMED", "name": str, "nullable": bool}` or `{"kind": "LIST",
+  "of": <descriptor>, "nullable": bool}`. This is deliberate, not a bug —
+  GraphQL types aren't JSON Schema, and forcing a translation would lose
+  nullability precision — but it means any caller reading these two
+  columns must branch on `node.kind` before interpreting them. Phase 2's
+  drift-checker (the direct consumer, per SPEC.md §7.2/§10) needs to know
+  this going in.
 
 ### Verified
 
