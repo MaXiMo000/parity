@@ -12,7 +12,7 @@ from app.db import DEFAULT_USER_ID, get_session
 from app.edges import compute_rest_edges
 from app.models import Node, Workspace
 from app.schema.graphql import GraphQLFetchError, GraphQLValidationError, fetch_introspection, parse_graphql
-from app.schema.openapi import OpenAPIFetchError, OpenAPIValidationError, fetch_spec, parse_openapi
+from app.schema.openapi import OpenAPIFetchError, OpenAPIValidationError, extract_base_path, fetch_spec, parse_openapi
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
 
@@ -28,6 +28,7 @@ def create_workspace(body: dict, session: Session = Depends(get_session)) -> dic
     if bool(url) == bool(raw):
         raise HTTPException(status_code=422, detail="exactly one of schema_source_url or raw_schema is required")
 
+    base_path = ""
     if schema_kind == "openapi":
         if url:
             try:
@@ -40,6 +41,7 @@ def create_workspace(body: dict, session: Session = Depends(get_session)) -> dic
             parsed_nodes = parse_openapi(spec)
         except OpenAPIValidationError as exc:
             raise HTTPException(status_code=422, detail=f"invalid OpenAPI spec: {exc}") from exc
+        base_path = extract_base_path(spec)
     else:
         if url:
             try:
@@ -59,7 +61,7 @@ def create_workspace(body: dict, session: Session = Depends(get_session)) -> dic
 
     workspace = Workspace(
         user_id=DEFAULT_USER_ID, name=name, schema_kind=schema_kind,
-        schema_source=url or "pasted", raw_schema=spec,
+        schema_source=url or "pasted", raw_schema=spec, base_path=base_path,
     )
     session.add(workspace)
     session.flush()
@@ -100,6 +102,7 @@ def get_workspace(workspace_id: str, session: Session = Depends(get_session)) ->
 
     return {
         "id": workspace.id, "name": workspace.name, "schema_kind": workspace.schema_kind,
+        "base_path": workspace.base_path,
         "nodes": node_dicts,
         "edges": [{"from_node": a, "to_node": b} for a, b in edges],
     }

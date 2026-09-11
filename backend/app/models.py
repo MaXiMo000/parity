@@ -39,6 +39,7 @@ class Workspace(Base):
     name: Mapped[str] = mapped_column(String)
     schema_kind: Mapped[str] = mapped_column(String)  # "openapi" | "graphql"
     schema_source: Mapped[str] = mapped_column(Text)  # the URL, or "pasted"
+    base_path: Mapped[str] = mapped_column(Text, default="")  # OpenAPI servers[0].url's path component (e.g. "/api/v3"); "" for GraphQL or a spec with no servers entry
     raw_schema: Mapped[dict | str] = mapped_column(JSONB)  # dict (OpenAPI/introspection) or str (pasted SDL)
     encrypted_credential: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
@@ -65,3 +66,39 @@ class Node(Base):
     call_count: Mapped[int] = mapped_column(Integer, default=0)
 
     workspace: Mapped[Workspace] = relationship(back_populates="nodes")
+
+
+class Request(Base):
+    __tablename__ = "request"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"))
+    node_id: Mapped[str | None] = mapped_column(ForeignKey("node.id"), nullable=True)
+    method: Mapped[str] = mapped_column(String)
+    url: Mapped[str] = mapped_column(Text)
+    headers: Mapped[dict] = mapped_column(JSONB)  # redacted before persisting, see app/redact.py
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Response(Base):
+    __tablename__ = "response"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    request_id: Mapped[str] = mapped_column(ForeignKey("request.id"))
+    status_code: Mapped[int] = mapped_column(Integer)
+    headers: Mapped[dict] = mapped_column(JSONB)  # redacted before persisting
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    latency_ms: Mapped[int] = mapped_column(Integer)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class DriftFinding(Base):
+    __tablename__ = "drift_finding"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    response_id: Mapped[str] = mapped_column(ForeignKey("response.id"))
+    node_id: Mapped[str | None] = mapped_column(ForeignKey("node.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String)  # "matched" | "violated" | "unverified_no_schema" | "unverified_no_match"
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

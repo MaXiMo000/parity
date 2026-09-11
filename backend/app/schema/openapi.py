@@ -12,6 +12,7 @@ discipline extends here)."""
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
 
 from openapi_spec_validator import validate
 
@@ -46,6 +47,21 @@ def fetch_spec(source: str) -> dict[str, Any]:
         return yaml.safe_load(resp.text)
     except Exception as exc:  # noqa: BLE001 -- any YAML parse failure is a fetch-shaped failure here
         raise OpenAPIFetchError(f"{source} is neither valid JSON nor YAML") from exc
+
+
+def extract_base_path(spec: dict[str, Any]) -> str:
+    """Returns the path component of the spec's first `servers` entry
+    (e.g. "/api/v3"), or "" if there's no servers entry or its url has no
+    path component. A real request's full path must have this prefix
+    stripped before matching against a Node's path_template, which is
+    stored relative to this base -- verified necessary against the real
+    Petstore fixture, whose own servers[0].url is "/api/v3" (SPEC.md
+    §7.2/§13)."""
+    servers = spec.get("servers") or []
+    if not servers:
+        return ""
+    url = servers[0].get("url", "")
+    return urlparse(url).path.rstrip("/")
 
 
 def _resolve_refs(node: Any, root: dict[str, Any], seen: frozenset[str] = frozenset()) -> Any:
