@@ -234,3 +234,89 @@ Real request execution against both REST and GraphQL targets, through a
 full SSRF-hardened proxy, and real drift-checking (comparing live response
 shapes against each node's declared schema) — replacing the honest 501
 with actual verified/violated states.
+
+## 2026-09-11: Phase 1c: SSRF Hardening + Workspace List — done, live-verified
+
+**What/Why**: Phase 1b's final review parked two Minor findings in the
+SSRF guard used by `fetch_spec`/`fetch_introspection`, and Phase 1a/1b both
+carried forward the same named UI gap (no way to reopen a persisted
+workspace). This phase closes all three.
+
+**What was built**:
+
+- **DNS-pinning fix**: `_resolve_safe_ip`/`_build_pinned_request` (`app/schema/openapi.py`)
+  now resolve a spec URL's hostname, validate every resolved address is
+  globally routable, and then build the real `httpx.Request` to connect
+  **directly to that validated IP** — with the original hostname preserved
+  as the `Host` header and TLS SNI (`extensions={"sni_hostname": ...}`) so
+  the request is indistinguishable from an ordinary one to the target
+  server. This closes the specific DNS-rebinding TOCTOU window Phase 1b's
+  final review flagged as a parked Minor: previously the guard validated
+  a hostname's resolved address, then let `httpx` re-resolve independently
+  at connect time — a hostname that resolves safely on the validation
+  lookup and unsafely on httpx's own lookup a moment later would have
+  slipped through.
+- **CGNAT fix**: the same guard now rejects `100.64.0.0/10` (RFC 6598),
+  real internal address space at several cloud providers, which the old
+  `is_private`/`is_loopback`/`is_link_local`/`is_reserved` checks missed
+  entirely. The fix replaces that check list with Python's stdlib
+  `ipaddress.ip_address(ip).is_global`, which correctly subsumes all four
+  old checks and additionally covers CGNAT.
+- **Workspace-list/picker UI**: a `WorkspaceList` component
+  (`frontend/src/components/WorkspaceList.tsx`) adds a "Load existing…"
+  `<select>` populated from `listWorkspaces`, wired to an `onLoad` handler
+  in `App.tsx` that calls `getWorkspace(id)` and re-renders the graph —
+  closing the gap named in Phase 1a's HANDOFF ("No workspace-list/picker
+  UI yet... every persisted workspace is currently only reachable by
+  re-creating it") and carried through Phase 1b's.
+
+**What this is *not***: this still isn't SPEC.md §7.3's fuller Phase-2
+sandboxed-proxy mitigation. That mitigation covers real request
+*execution* against arbitrary user-supplied target APIs (Phase 2's
+Send-button work) — a different, larger surface than schema *fetching*,
+which is all this phase touches. Nobody should read this phase as having
+finished §7.3.
+
+### Verified
+
+- Backend: `cd backend && .venv/bin/python -m pytest -q` — **38 passed**
+  (real output, confirmed 2026-09-11; up from Phase 1b's 32).
+- Frontend: `cd frontend && npx vitest run` — **7 passed** across 3 test
+  files (real output, confirmed 2026-09-11; unchanged from Phase 1b's
+  count — the picker is covered by live verification below rather than
+  new unit tests).
+- **Live-verified in a real browser** (backend on `:8123` against real
+  Postgres via `docker compose` + `alembic upgrade head`, frontend
+  `npm run dev` on `:5173`, driven with an actual browser, not simulated):
+  - Created a workspace named "Petstore OpenAPI", kind OpenAPI, URL
+    `https://petstore3.swagger.io/api/v3/openapi.json`. `POST
+    /api/workspaces` → 201, `GET /api/workspaces/{id}` → 200 with the real
+    19 nodes (matching Phase 1a's known result), and the 3D graph rendered
+    the same ring-shaped, edge-connected layout as before — confirming the
+    DNS-pinning rewrite didn't break real external fetches, only tightened
+    what it accepts.
+  - Created a second workspace named "Countries GraphQL", kind GraphQL,
+    URL `https://countries.trevorblades.com/graphql`. `POST
+    /api/workspaces` → 201, `GET /api/workspaces/{id}` → 200 with the real
+    6 nodes (matching Phase 1b's known result) — same confirmation for the
+    GraphQL path.
+  - Confirmed the "Load existing…" picker listed both workspaces by name
+    and kind: "Petstore OpenAPI (openapi)" and "Countries GraphQL
+    (graphql)". Selected the first one; a fresh `GET
+    /api/workspaces/{petstore-id}` fired and the graph reloaded to show
+    the Petstore ring layout — confirming the picker's `onLoad` →
+    `getWorkspace` round-trip works for real, not just against mocked
+    tests.
+  - Did a full browser refresh (`navigate` to `http://localhost:5173`,
+    not a client-side route change). The app reset to its empty state (no
+    workspace auto-selected) but the "Load existing…" picker still listed
+    both "Petstore OpenAPI (openapi)" and "Countries GraphQL (graphql)" —
+    confirming they're really in Postgres, not component state.
+
+### Next (Phase 2, SPEC.md §10–11)
+
+Real request execution against both REST and GraphQL targets, through the
+full SSRF-hardened proxy (SPEC.md §7.3's sandboxed-proxy mitigation, not
+yet built), and real drift-checking (comparing live response shapes
+against each node's declared schema) — replacing the honest 501 with
+actual verified/violated states.
