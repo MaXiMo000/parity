@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import ForeignKey, Integer, LargeBinary, String, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, LargeBinary, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -28,7 +28,7 @@ class User(Base):
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
     github_id: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
     username: Mapped[str] = mapped_column(String)
-    created_at: Mapped[datetime] = mapped_column(default=_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
 class Workspace(Base):
@@ -41,10 +41,12 @@ class Workspace(Base):
     schema_source: Mapped[str] = mapped_column(Text)  # the URL, or "pasted"
     raw_schema: Mapped[dict] = mapped_column(JSONB)
     encrypted_credential: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(default=_now)
-    updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
-    nodes: Mapped[list["Node"]] = relationship(back_populates="workspace", cascade="all, delete-orphan")
+    nodes: Mapped[list["Node"]] = relationship(
+        back_populates="workspace", cascade="all, delete-orphan", order_by="Node.id"
+    )
 
 
 class Node(Base):

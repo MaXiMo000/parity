@@ -11,7 +11,10 @@ discipline extends here)."""
 
 from __future__ import annotations
 
+import ipaddress
+import socket
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 from openapi_spec_validator import validate
@@ -27,13 +30,49 @@ class OpenAPIValidationError(Exception):
     pass
 
 
+def _is_safe_url(url: str) -> bool:
+    """Reject obviously-internal targets before fetching — SPEC.md §7.3's
+    same reasoning applied to this phase's own new fetch surface (the
+    OpenAPI source URL), not just Phase 2's later request proxy. This is a
+    baseline guard for THIS phase only -- Phase 2's request proxy will need
+    its own more complete, sandboxed version per SPEC.md §7.3."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return False
+    hostname = parsed.hostname
+    if not hostname:
+        return False
+    try:
+        infos = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        return False
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            return False
+    return True
+
+
 def fetch_spec(source: str) -> dict[str, Any]:
     """`source` is a URL. Raises OpenAPIFetchError on any network failure
-    or unparseable body (JSON or YAML, real specs are published as either)."""
+    or unparseable body (JSON or YAML, real specs are published as either).
+
+    Redirects are followed manually (at most one hop) so an allowed URL
+    can't silently redirect to an internal target."""
+    if not _is_safe_url(source):
+        raise OpenAPIFetchError(f"{source} is not a permitted target")
     try:
-        resp = httpx.get(source, timeout=15.0, follow_redirects=True)
+        resp = httpx.get(source, timeout=15.0, follow_redirects=False)
     except httpx.HTTPError as exc:
         raise OpenAPIFetchError(f"could not reach {source}: {exc}") from exc
+    if resp.is_redirect:
+        location = resp.headers.get("location")
+        if not location or not _is_safe_url(location):
+            raise OpenAPIFetchError(f"{source} redirected to a target that is not permitted")
+        try:
+            resp = httpx.get(location, timeout=15.0, follow_redirects=False)
+        except httpx.HTTPError as exc:
+            raise OpenAPIFetchError(f"could not reach {location}: {exc}") from exc
     if resp.status_code != 200:
         raise OpenAPIFetchError(f"{source} returned HTTP {resp.status_code}")
     try:
@@ -72,7 +111,10 @@ def _resolve_refs(node: Any, root: dict[str, Any], seen: frozenset[str] = frozen
 def _first_2xx_response_schema(responses: dict[str, Any], spec: dict[str, Any]) -> dict | None:
     for status in sorted(responses):
         if status.startswith("2"):
-            schema = responses[status].get("content", {}).get("application/json", {}).get("schema")
+            # The response object itself can be a `$ref` (not just its nested
+            # schema) -- resolve it before navigating into .content/.schema.
+            response_obj = _resolve_refs(responses[status], spec)
+            schema = response_obj.get("content", {}).get("application/json", {}).get("schema")
             return _resolve_refs(schema, spec) if schema is not None else None
     return None
 
@@ -99,7 +141,10 @@ def parse_openapi(spec: dict[str, Any]) -> list[dict[str, Any]]:
                 continue
             operation_id = op.get("operationId") or f"{method}_{path}".replace("/", "_").replace("{", "").replace("}", "")
             request_schema = None
-            body = op.get("requestBody", {}).get("content", {}).get("application/json", {}).get("schema")
+            # The requestBody itself can be a `$ref` (not just its nested
+            # schema) -- resolve the object before navigating into it.
+            request_body_obj = _resolve_refs(op.get("requestBody"), spec) if op.get("requestBody") else None
+            body = (request_body_obj or {}).get("content", {}).get("application/json", {}).get("schema")
             if body is not None:
                 request_schema = _resolve_refs(body, spec)
             response_schema = _first_2xx_response_schema(op.get("responses", {}), spec)

@@ -95,22 +95,38 @@ this task plan intentionally split them; Phase 1b is a separate upcoming task.)
 - Frontend: `cd frontend && npx vitest run` — 5 passed (no new tests; existing
   render/interaction tests still passing). `npx tsc -b` clean. `npx vite build`
   successful (expected chunk-size warning for a 3D graph library is not a blocker).
-- **Live-verified in a real browser**: opened the app, clicked the workspace
-  list, pasted `https://petstore3.swagger.io/api/v3/openapi.json`, backend
-  fetched, validated, parsed, and stored 19 nodes in the database; frontend
-  fetched and rendered the nodes in 3D with correct resolved schemas in each
-  node's detail panel; clicked Send on any node, saw the honest 501 response
-  with correct message and formatting.
+- **Live-verified in a real browser**: opened the app, created a workspace
+  via the form with `https://petstore3.swagger.io/api/v3/openapi.json`,
+  backend fetched, validated, parsed, and stored 19 nodes in the database;
+  frontend fetched and rendered the graph in 3D with correct resolved
+  schemas in each node's detail panel; clicked Send on any node, saw the
+  honest 501 response with correct message and formatting. (There is no
+  workspace-list/picker UI yet — see the gap noted below.)
 
 ### Run it locally
 
 ```
-cd backend && .venv/bin/python -m pytest -q          # verify persistence + parsing
-.venv/bin/uvicorn app.main:app --port 8123           # start server (auto-creates db)
+cd backend
+docker compose up -d
+DATABASE_URL="postgresql+psycopg://parity:parity@127.0.0.1:5441/parity" .venv/bin/alembic upgrade head
+DATABASE_URL="postgresql+psycopg://parity:parity@127.0.0.1:5441/parity" .venv/bin/uvicorn app.main:app --port 8123
 
-cd frontend && npm run dev                            # start client
-# browse to localhost:5173, try pasting a spec URL in the workspace editor
+cd frontend && npm install && npm run dev
+# browse to localhost:5173, create a workspace via the form (name + OpenAPI URL)
 ```
+
+`app/main.py`'s startup hook only calls `ensure_default_user` — it does
+**not** create tables. `docker compose up` and a real `alembic upgrade
+head` against the running Postgres are both required before `uvicorn` will
+serve real requests.
+
+### Known gap for Phase 1b
+
+No workspace-list/picker UI yet — every persisted workspace is currently
+only reachable by re-creating it (re-parsing its URL again). `listWorkspaces`
+and `WorkspaceSummary` in `frontend/src/api.ts` are exported and the backend
+route works, but nothing in the UI calls them. Phase 1b or a small follow-up
+should add a real list view.
 
 ### Next (Phase 1b and beyond, SPEC.md §11–13)
 

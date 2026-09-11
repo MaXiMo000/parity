@@ -16,7 +16,7 @@ from app.schema.openapi import OpenAPIFetchError, OpenAPIValidationError, fetch_
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
 
 
-@router.post("")
+@router.post("", status_code=201)
 def create_workspace(body: dict, session: Session = Depends(get_session)) -> dict:
     name = body.get("name")
     schema_kind = body.get("schema_kind")
@@ -76,7 +76,10 @@ def get_workspace(workspace_id: str, session: Session = Depends(get_session)) ->
         }
         for n in workspace.nodes
     ]
-    edges = compute_rest_edges([{"id": n["id"], "path_template": n["path_template"]} for n in node_dicts])
+    edges = compute_rest_edges([
+        {"id": n["id"], "path_template": n["path_template"]}
+        for n in node_dicts if n["path_template"] is not None
+    ])
 
     return {
         "id": workspace.id, "name": workspace.name, "schema_kind": workspace.schema_kind,

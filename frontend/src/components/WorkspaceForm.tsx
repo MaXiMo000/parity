@@ -1,9 +1,9 @@
 import { useState } from 'react'
 
 /** The real "give it a schema" entry point (SPEC.md §6 step 1) — a real
- * OpenAPI URL, submitted for real parsing. Pasting a raw spec is the v1
- * stand-in for real file upload (SPEC.md §3's own "either is fine, don't
- * block on this" spirit, applied here to upload vs. paste). */
+ * OpenAPI URL, submitted for real parsing. This form only supports a URL
+ * today; raw-schema paste (`createWorkspace`'s `{rawSchema}` branch) is a
+ * real, supported backend capability with no UI yet. */
 export function WorkspaceForm({ onCreate, busy }: {
   onCreate: (name: string, url: string) => void
   busy: boolean

@@ -1,4 +1,5 @@
 import json
+import socket
 from pathlib import Path
 
 import httpx
@@ -60,7 +61,14 @@ def test_invalid_spec_raises_validation_error():
 
 
 @respx.mock
-def test_fetch_spec_real_http_get():
+def test_fetch_spec_real_http_get(monkeypatch):
+    # "example.invalid" is RFC 2606 reserved and never actually resolves --
+    # respx mocks the HTTP layer but not DNS, so fake a public-IP resolution
+    # for our own pre-fetch safety check (app/schema/openapi.py's _is_safe_url).
+    monkeypatch.setattr(
+        socket, "getaddrinfo",
+        lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],
+    )
     respx.get("https://example.invalid/openapi.json").mock(
         return_value=httpx.Response(200, json=FIXTURE)
     )
@@ -69,9 +77,44 @@ def test_fetch_spec_real_http_get():
 
 
 @respx.mock
-def test_fetch_spec_network_failure_raises():
+def test_fetch_spec_network_failure_raises(monkeypatch):
     from app.schema.openapi import OpenAPIFetchError
 
+    monkeypatch.setattr(
+        socket, "getaddrinfo",
+        lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],
+    )
     respx.get("https://example.invalid/openapi.json").mock(side_effect=httpx.ConnectError("boom"))
     with pytest.raises(OpenAPIFetchError):
         fetch_spec("https://example.invalid/openapi.json")
+
+
+def test_fetch_spec_rejects_a_private_ip_target():
+    from app.schema.openapi import OpenAPIFetchError
+
+    with pytest.raises(OpenAPIFetchError):
+        fetch_spec("http://127.0.0.1:9999/whatever")
+
+
+def test_ref_at_the_requestbody_object_level_is_also_resolved():
+    spec = {
+        "openapi": "3.0.0", "info": {"title": "t", "version": "1"},
+        "components": {
+            "requestBodies": {
+                "Widget": {"content": {"application/json": {"schema": {"type": "object", "properties": {"name": {"type": "string"}}}}}},
+            },
+        },
+        "paths": {
+            "/widgets": {
+                "post": {
+                    "operationId": "createWidget",
+                    "requestBody": {"$ref": "#/components/requestBodies/Widget"},
+                    "responses": {"200": {"description": "ok"}},
+                },
+            },
+        },
+    }
+    nodes = parse_openapi(spec)
+    node = nodes[0]
+    assert node["declared_request_schema"] is not None
+    assert node["declared_request_schema"]["properties"]["name"]["type"] == "string"

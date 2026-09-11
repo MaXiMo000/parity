@@ -1,7 +1,7 @@
 [project]
 name = "parity-backend"
 version = "0.1.0"
-description = "parity backend — Phase 0: fixture workspace only"
+description = "parity backend — real OpenAPI ingestion, Postgres persistence"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",

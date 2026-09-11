@@ -1,4 +1,5 @@
 import json
+import socket
 from pathlib import Path
 
 import httpx
@@ -12,13 +13,20 @@ FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "petstore-openapi.jso
 
 
 @respx.mock
-def test_create_workspace_from_a_real_url():
+def test_create_workspace_from_a_real_url(monkeypatch):
+    # "example.invalid" is RFC 2606 reserved and never actually resolves --
+    # respx mocks the HTTP layer but not DNS, so fake a public-IP resolution
+    # for our own pre-fetch safety check (app/schema/openapi.py's _is_safe_url).
+    monkeypatch.setattr(
+        socket, "getaddrinfo",
+        lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],
+    )
     respx.get("https://example.invalid/openapi.json").mock(return_value=httpx.Response(200, json=FIXTURE))
     r = client.post("/api/workspaces", json={
         "name": "Petstore", "schema_kind": "openapi",
         "schema_source_url": "https://example.invalid/openapi.json",
     })
-    assert r.status_code == 200
+    assert r.status_code == 201
     body = r.json()
     assert body["name"] == "Petstore"
     assert body["node_count"] > 10
@@ -28,7 +36,7 @@ def test_create_workspace_from_a_pasted_raw_schema():
     r = client.post("/api/workspaces", json={
         "name": "Petstore (pasted)", "schema_kind": "openapi", "raw_schema": FIXTURE,
     })
-    assert r.status_code == 200
+    assert r.status_code == 201
     assert r.json()["node_count"] > 10
 
 
