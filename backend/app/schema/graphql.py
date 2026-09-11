@@ -33,10 +33,10 @@ class GraphQLValidationError(Exception):
 def fetch_introspection(source: str) -> dict[str, Any]:
     """`source` is a GraphQL endpoint URL. POSTs the standard
     introspection query and returns its `data` payload -- the same shape
-    `parse_graphql` accepts directly. Reuses openapi.py's `send_pinned`
-    (same DNS-pinning + SSRF-baseline reasoning, SPEC.md §7.3, applied to
-    this new fetch surface) rather than a second, independently-drifting
-    copy."""
+    `parse_graphql` accepts directly. Reuses `app.proxy.ssrf_guard`'s
+    `send_pinned` (same DNS-pinning + SSRF-baseline reasoning, SPEC.md §7.3,
+    applied to this new fetch surface) rather than a second,
+    independently-drifting copy."""
     resp = send_pinned("POST", source, GraphQLFetchError, json={"query": get_introspection_query()})
     if resp.status_code != 200:
         raise GraphQLFetchError(f"{source} returned HTTP {resp.status_code}")

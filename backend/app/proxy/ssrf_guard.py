@@ -12,6 +12,7 @@ because no other caller existed yet)."""
 
 from __future__ import annotations
 
+import concurrent.futures
 import ipaddress
 import socket
 from typing import Any
@@ -19,7 +20,15 @@ from urllib.parse import urlparse
 
 import httpx
 
-_SENSITIVE_HEADERS = {"authorization", "cookie", "proxy-authorization"}
+# The full set of header names this backend treats as carrying real
+# credentials -- the single source of truth (app/redact.py imports this
+# same set rather than keeping its own, drifted copy; Phase 2a's final
+# review found the two lists disagreed, letting X-Api-Key -- the
+# dominant auth scheme for the REST APIs this tool targets, e.g. its own
+# Petstore reference fixture -- leak to a redirect target unchanged).
+SENSITIVE_HEADERS = {"authorization", "cookie", "proxy-authorization", "set-cookie", "x-api-key"}
+
+_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=8)
 
 
 def _resolve_safe_ip(hostname: str) -> str | None:
@@ -71,6 +80,23 @@ def _build_pinned_request(method: str, url: str, **kwargs: Any) -> httpx.Request
     return httpx.Request(method, pinned_url, headers=headers, extensions={"sni_hostname": hostname}, **kwargs)
 
 
+def _send_with_wall_clock(req: httpx.Request, timeout: float) -> httpx.Response:
+    """Sends req in a worker thread and enforces `timeout` as a genuine
+    wall-clock bound via the thread's own result(timeout=...) -- httpx's
+    per-operation timeout alone lets a slow-drip response reset its read
+    timer on every chunk and run well past the configured limit (verified
+    directly, Phase 2a's final review, finding I4: 20 one-second drips
+    completed in ~20s against Client(timeout=15.0)). The abandoned thread
+    on a real timeout is bounded by its own httpx timeout and the
+    fixed-size pool -- it is not join()'d, but it cannot run forever."""
+    def _do_send() -> httpx.Response:
+        with httpx.Client(timeout=timeout) as client:
+            return client.send(req, follow_redirects=False)
+
+    future = _EXECUTOR.submit(_do_send)
+    return future.result(timeout=timeout)
+
+
 def send_pinned(method: str, url: str, error_cls: type[Exception], *, timeout: float = 15.0, **kwargs: Any) -> httpx.Response:
     """Builds a pinned request (_build_pinned_request) and sends it,
     manually following at most one redirect hop -- the hop itself
@@ -90,10 +116,11 @@ def send_pinned(method: str, url: str, error_cls: type[Exception], *, timeout: f
         req = _build_pinned_request(method, url, **kwargs)
         if req is None:
             raise error_cls(f"{url} is not a permitted target")
-        with httpx.Client(timeout=timeout) as client:
-            resp = client.send(req, follow_redirects=False)
+        resp = _send_with_wall_clock(req, timeout)
     except error_cls:
         raise
+    except concurrent.futures.TimeoutError:
+        raise error_cls(f"{url} did not respond within {timeout}s")
     except Exception as exc:  # noqa: BLE001 -- _build_pinned_request can raise httpx.InvalidURL
         # (not an httpx.HTTPError subclass) on a malformed URL, and the
         # actual send can raise httpx.HTTPError on a network failure --
@@ -111,17 +138,20 @@ def send_pinned(method: str, url: str, error_cls: type[Exception], *, timeout: f
             if redirect_host and redirect_host != original_host:
                 headers = dict(redirect_kwargs.get("headers") or {})
                 for key in list(headers):
-                    if key.lower() in _SENSITIVE_HEADERS:
+                    if key.lower() in SENSITIVE_HEADERS:
                         del headers[key]
                 redirect_kwargs["headers"] = headers
+                redirect_kwargs.pop("content", None)
+                redirect_kwargs.pop("json", None)
         try:
             redirect_req = _build_pinned_request(method, location, **redirect_kwargs) if location else None
             if redirect_req is None:
                 raise error_cls(f"{url} redirected to a target that is not permitted")
-            with httpx.Client(timeout=timeout) as client:
-                resp = client.send(redirect_req, follow_redirects=False)
+            resp = _send_with_wall_clock(redirect_req, timeout)
         except error_cls:
             raise
+        except concurrent.futures.TimeoutError:
+            raise error_cls(f"{location} did not respond within {timeout}s")
         except Exception as exc:  # noqa: BLE001 -- same reasoning as above
             raise error_cls(f"could not reach {location}: {exc}") from exc
     return resp

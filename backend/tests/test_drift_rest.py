@@ -36,3 +36,14 @@ def test_non_json_body_is_violated():
     status, detail = check_rest_drift(SCHEMA, "not json at all")
     assert status == "violated"
     assert "not valid JSON" in detail
+
+
+def test_a_dangling_ref_in_the_declared_schema_is_unverified_not_a_crash():
+    # A real shape openapi.py's own $ref-cycle-guard produces on a
+    # recursive schema (e.g. a self-referencing Comment type) -- the
+    # pointer is real syntax but doesn't resolve against this fragment
+    # alone.
+    schema = {"type": "object", "properties": {"reply": {"$ref": "#/components/schemas/Comment"}}}
+    status, detail = check_rest_drift(schema, '{"reply": {}}')
+    assert status == "unverified_no_schema"
+    assert detail is not None

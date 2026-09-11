@@ -45,6 +45,8 @@ def send_request(workspace_id: str, body: dict, session: Session = Depends(get_s
     req_body = body.get("body")
     if not method or not url:
         raise HTTPException(status_code=422, detail="method and url are required")
+    if req_body is not None and not isinstance(req_body, str):
+        raise HTTPException(status_code=422, detail="body must be a string or null")
 
     try:
         resp, latency_ms = fire_request(method, url, headers, req_body)
@@ -77,7 +79,12 @@ def send_request(workspace_id: str, body: dict, session: Session = Depends(get_s
 
     if node is not None:
         node.call_count += 1
-        status, detail = check_rest_drift(node.declared_response_schema, resp.text)
+        if resp.status_code == 204:
+            status, detail = "unverified_no_schema", "204 No Content has no body to validate against a declared schema"
+        elif not (200 <= resp.status_code < 300):
+            status, detail = "unverified_no_schema", f"non-2xx response ({resp.status_code}); only 2xx response schemas are declared (SPEC.md §7.2)"
+        else:
+            status, detail = check_rest_drift(node.declared_response_schema, resp.text)
     else:
         status, detail = "unverified_no_match", None
 

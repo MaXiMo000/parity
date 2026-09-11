@@ -6,11 +6,11 @@ scrubbed."""
 
 from __future__ import annotations
 
-_SENSITIVE_HEADER_NAMES = {"authorization", "cookie", "set-cookie", "proxy-authorization", "x-api-key"}
+from app.proxy.ssrf_guard import SENSITIVE_HEADERS
 
 
 def redact_headers(headers: dict[str, str]) -> dict[str, str]:
     return {
-        key: ("[REDACTED]" if key.lower() in _SENSITIVE_HEADER_NAMES else value)
+        key: ("[REDACTED]" if key.lower() in SENSITIVE_HEADERS else value)
         for key, value in headers.items()
     }

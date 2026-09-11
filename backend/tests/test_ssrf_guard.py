@@ -69,3 +69,54 @@ def test_send_pinned_preserves_credentials_on_a_same_host_redirect(monkeypatch):
     send_pinned("GET", "https://example.invalid/old", _FetchError, headers={"Authorization": "Bearer secret"})
     sent_headers = respx.calls.last.request.headers
     assert sent_headers.get("authorization") == "Bearer secret"
+
+
+@respx.mock
+def test_send_pinned_strips_x_api_key_on_a_cross_host_redirect(monkeypatch):
+    monkeypatch.setattr(
+        socket, "getaddrinfo",
+        lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],
+    )
+    respx.get("https://93.184.216.34/old").mock(
+        return_value=httpx.Response(302, headers={"location": "https://other.invalid/new"})
+    )
+    respx.get("https://93.184.216.34/new").mock(return_value=httpx.Response(200))
+    send_pinned("GET", "https://example.invalid/old", _FetchError, headers={"X-Api-Key": "supersecret"})
+    sent_headers = respx.calls.last.request.headers
+    assert "x-api-key" not in sent_headers
+
+
+@respx.mock
+def test_send_pinned_strips_the_body_on_a_cross_host_redirect(monkeypatch):
+    monkeypatch.setattr(
+        socket, "getaddrinfo",
+        lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],
+    )
+    respx.post("https://93.184.216.34/old").mock(
+        return_value=httpx.Response(302, headers={"location": "https://other.invalid/new"})
+    )
+    respx.post("https://93.184.216.34/new").mock(return_value=httpx.Response(200))
+    send_pinned("POST", "https://example.invalid/old", _FetchError, content=b"sensitive-body-data")
+    sent_content = respx.calls.last.request.content
+    assert sent_content == b""
+
+
+@respx.mock
+def test_send_pinned_enforces_a_genuine_wall_clock_timeout(monkeypatch):
+    import time
+
+    monkeypatch.setattr(
+        socket, "getaddrinfo",
+        lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],
+    )
+
+    def slow_side_effect(request):
+        time.sleep(2)
+        return httpx.Response(200)
+
+    respx.get("https://93.184.216.34/slow").mock(side_effect=slow_side_effect)
+    start = time.monotonic()
+    with pytest.raises(_FetchError):
+        send_pinned("GET", "https://example.invalid/slow", _FetchError, timeout=0.5)
+    elapsed = time.monotonic() - start
+    assert elapsed < 1.5  # well under the 2s the mock sleeps -- proves the wall clock, not the mock's own delay, bounded this

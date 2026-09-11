@@ -92,6 +92,49 @@ def test_send_requires_method_and_url():
     assert r.status_code == 422
 
 
+def test_send_rejects_a_non_string_body():
+    ws = client.post("/api/workspaces", json={
+        "name": "x", "schema_kind": "openapi",
+        "raw_schema": {"openapi": "3.0.0", "info": {"title": "t", "version": "1"}, "paths": {}},
+    }).json()
+    r = client.post(f"/api/workspaces/{ws['id']}/requests", json={
+        "method": "GET", "url": "https://example.invalid/x", "headers": {}, "body": {"not": "a string"},
+    })
+    assert r.status_code == 422
+
+
+@respx.mock
+def test_a_real_404_is_unverified_not_a_false_violation(monkeypatch):
+    _fake_getaddrinfo(monkeypatch)
+    ws = client.post("/api/workspaces", json={
+        "name": "Petstore", "schema_kind": "openapi", "raw_schema": FIXTURE,
+    }).json()
+    respx.get("https://93.184.216.34/api/v3/pet/1").mock(
+        return_value=httpx.Response(404, json={"code": 1, "type": "error", "message": "Pet not found"})
+    )
+    r = client.post(f"/api/workspaces/{ws['id']}/requests", json={
+        "method": "GET", "url": "https://example.invalid/api/v3/pet/1", "headers": {}, "body": None,
+    })
+    assert r.status_code == 201
+    body = r.json()
+    assert body["response"]["status_code"] == 404
+    assert body["drift_finding"]["status"] == "unverified_no_schema"
+
+
+@respx.mock
+def test_a_204_is_unverified_not_a_false_violation(monkeypatch):
+    _fake_getaddrinfo(monkeypatch)
+    ws = client.post("/api/workspaces", json={
+        "name": "Petstore", "schema_kind": "openapi", "raw_schema": FIXTURE,
+    }).json()
+    respx.get("https://93.184.216.34/api/v3/pet/1").mock(return_value=httpx.Response(204))
+    r = client.post(f"/api/workspaces/{ws['id']}/requests", json={
+        "method": "GET", "url": "https://example.invalid/api/v3/pet/1", "headers": {}, "body": None,
+    })
+    assert r.status_code == 201
+    assert r.json()["drift_finding"]["status"] == "unverified_no_schema"
+
+
 @respx.mock
 def test_request_history_lists_what_was_sent(monkeypatch):
     _fake_getaddrinfo(monkeypatch)

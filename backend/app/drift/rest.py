@@ -28,4 +28,12 @@ def check_rest_drift(declared_response_schema: dict[str, Any] | None, response_b
         jsonschema.validate(body, declared_response_schema)
     except jsonschema.ValidationError as exc:
         return "violated", f"{exc.json_path}: {exc.message}"
+    except Exception as exc:  # noqa: BLE001 -- a malformed or unresolvable declared
+        # schema (e.g. a dangling $ref left by openapi.py's _resolve_refs cycle
+        # guard, or a real jsonschema.SchemaError) means there is nothing
+        # usable to check the response against -- unverified_no_schema is the
+        # honest outcome here, not a crash and not a guessed "violated"
+        # (Phase 2a's final review, finding I2, reproduced with an ordinary
+        # self-referencing schema).
+        return "unverified_no_schema", f"declared schema could not be used: {exc}"
     return "matched", None
