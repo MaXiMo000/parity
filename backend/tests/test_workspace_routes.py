@@ -1,32 +1,86 @@
+import json
+from pathlib import Path
+
+import httpx
+import respx
 from fastapi.testclient import TestClient
 
-from app.fixtures import FIXTURE_WORKSPACE_ID
 from app.main import app
 
 client = TestClient(app)
+FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "petstore-openapi.json").read_text())
 
 
-def test_list_workspaces_returns_the_fixture():
-    r = client.get("/api/workspaces")
+@respx.mock
+def test_create_workspace_from_a_real_url():
+    respx.get("https://example.invalid/openapi.json").mock(return_value=httpx.Response(200, json=FIXTURE))
+    r = client.post("/api/workspaces", json={
+        "name": "Petstore", "schema_kind": "openapi",
+        "schema_source_url": "https://example.invalid/openapi.json",
+    })
     assert r.status_code == 200
     body = r.json()
-    assert len(body) == 1
-    assert body[0]["id"] == FIXTURE_WORKSPACE_ID
-    assert body[0]["schema_kind"] == "openapi"
+    assert body["name"] == "Petstore"
+    assert body["node_count"] > 10
 
 
-def test_get_workspace_includes_nodes_and_edges():
-    r = client.get(f"/api/workspaces/{FIXTURE_WORKSPACE_ID}")
+def test_create_workspace_from_a_pasted_raw_schema():
+    r = client.post("/api/workspaces", json={
+        "name": "Petstore (pasted)", "schema_kind": "openapi", "raw_schema": FIXTURE,
+    })
     assert r.status_code == 200
-    body = r.json()
-    assert len(body["nodes"]) == 5
-    assert len(body["edges"]) == 3
-    node_ids = {n["id"] for n in body["nodes"]}
-    for e in body["edges"]:
+    assert r.json()["node_count"] > 10
+
+
+def test_create_workspace_requires_exactly_one_source():
+    r = client.post("/api/workspaces", json={"name": "x", "schema_kind": "openapi"})
+    assert r.status_code == 422
+    r2 = client.post("/api/workspaces", json={
+        "name": "x", "schema_kind": "openapi",
+        "schema_source_url": "https://example.invalid/x.json", "raw_schema": FIXTURE,
+    })
+    assert r2.status_code == 422
+
+
+def test_create_workspace_rejects_an_invalid_spec():
+    r = client.post("/api/workspaces", json={
+        "name": "bad", "schema_kind": "openapi", "raw_schema": {"not": "openapi"},
+    })
+    assert r.status_code == 422
+
+
+@respx.mock
+def test_create_workspace_url_fetch_failure_is_502():
+    respx.get("https://example.invalid/down.json").mock(side_effect=httpx.ConnectError("boom"))
+    r = client.post("/api/workspaces", json={
+        "name": "x", "schema_kind": "openapi", "schema_source_url": "https://example.invalid/down.json",
+    })
+    assert r.status_code == 502
+
+
+def test_list_and_get_real_workspace():
+    created = client.post("/api/workspaces", json={
+        "name": "Petstore", "schema_kind": "openapi", "raw_schema": FIXTURE,
+    }).json()
+
+    listed = client.get("/api/workspaces").json()
+    assert any(w["id"] == created["id"] for w in listed)
+
+    got = client.get(f"/api/workspaces/{created['id']}").json()
+    assert got["name"] == "Petstore"
+    assert len(got["nodes"]) == created["node_count"]
+    assert len(got["edges"]) > 0
+    node_ids = {n["id"] for n in got["nodes"]}
+    for e in got["edges"]:
         assert e["from_node"] in node_ids
         assert e["to_node"] in node_ids
+    # real field names, matching SPEC.md §7.5
+    sample = got["nodes"][0]
+    for key in ("id", "kind", "method", "path_template", "operation_id",
+                "declared_request_schema", "declared_response_schema", "call_count"):
+        assert key in sample
 
 
 def test_get_unknown_workspace_is_404():
-    r = client.get("/api/workspaces/not-a-real-id")
+    r = client.get("/api/workspaces/00000000-0000-0000-0000-000000000099")
     assert r.status_code == 404
