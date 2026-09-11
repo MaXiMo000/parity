@@ -4,7 +4,8 @@ import type { Edge, Node } from '../api'
 
 const node = (id: string): Node => ({
   id, kind: 'rest_operation', method: 'GET', path_template: '/x',
-  operation_id: id, declared_request_schema: null, declared_response_schema: null, call_count: 0,
+  operation_id: id, type_name: null, field_name: null,
+  declared_request_schema: null, declared_response_schema: null, call_count: 0,
 })
 
 describe('computeLayout', () => {

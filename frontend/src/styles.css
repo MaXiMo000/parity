@@ -53,3 +53,17 @@ canvas{display:block}
 .dive__result{background:rgba(255,255,255,.02);border:1px solid var(--hair);
   border-radius:3px;padding:14px;margin-bottom:20px}
 .dive__detail{font-size:12px;line-height:1.6;color:var(--mute);margin-top:8px}
+
+.workspace-form{margin-left:auto;display:flex;gap:8px;align-items:center}
+.workspace-form input{background:rgba(255,255,255,.04);border:1px solid var(--hair);
+  color:var(--paper);font-family:var(--mono);font-size:11px;padding:9px 12px;
+  border-radius:2px}
+.workspace-form input:first-of-type{width:160px}
+.workspace-form input:last-of-type{width:320px}
+.workspace-form button{background:transparent;border:1px solid var(--match);
+  color:var(--match);font-family:var(--mono);font-size:10px;padding:9px 16px;
+  border-radius:2px;cursor:pointer}
+.workspace-form button:disabled{opacity:.5;cursor:not-allowed;border-color:var(--hair);color:var(--mute)}
+.idle-hint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:12px;color:var(--mute);padding:0 28px;text-align:center}
+.idle-hint--error{color:var(--violate)}

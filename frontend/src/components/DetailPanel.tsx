@@ -12,19 +12,24 @@ export function DetailPanel({ node, status, onClose, onSend }: {
   const closeRef = useModalPanel(node !== null, onClose)
   const [result, setResult] = useState<SendResult | null>(null)
   const [sending, setSending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     setResult(null)
     setSending(false)
+    setError(null)
   }, [node?.id])
 
   if (!node) return null
 
   async function handleSend() {
     setSending(true)
+    setError(null)
     try {
       const r = await onSend(node!.id)
       setResult(r)
+    } catch (e) {
+      setError(String(e))
     } finally {
       setSending(false)
     }
@@ -43,6 +48,8 @@ export function DetailPanel({ node, status, onClose, onSend }: {
         <button type="button" className="dive__send" onClick={handleSend} disabled={sending}>
           {sending ? 'Sending…' : 'Send'}
         </button>
+
+        {error && <p className="dive__detail" style={{ color: 'var(--violate)' }}>{error}</p>}
 
         {result && (
           <div className="dive__result">

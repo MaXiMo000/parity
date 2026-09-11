@@ -1,9 +1,11 @@
 export interface Node {
   id: string
   kind: 'rest_operation'
-  method: string
-  path_template: string
-  operation_id: string
+  method: string | null
+  path_template: string | null
+  operation_id: string | null
+  type_name: string | null
+  field_name: string | null
   declared_request_schema: Record<string, unknown> | null
   declared_response_schema: Record<string, unknown> | null
   call_count: number
@@ -40,6 +42,21 @@ async function json<T>(res: Response): Promise<T> {
     throw new Error(`${res.status} ${detail}`)
   }
   return res.json() as Promise<T>
+}
+
+export function createWorkspace(
+  name: string,
+  source: { url: string } | { rawSchema: object },
+): Promise<{ id: string; name: string; schema_kind: string; node_count: number }> {
+  const body =
+    'url' in source
+      ? { name, schema_kind: 'openapi', schema_source_url: source.url }
+      : { name, schema_kind: 'openapi', raw_schema: source.rawSchema }
+  return fetch('/api/workspaces', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then((res) => json<{ id: string; name: string; schema_kind: string; node_count: number }>(res))
 }
 
 export function listWorkspaces(): Promise<WorkspaceSummary[]> {
