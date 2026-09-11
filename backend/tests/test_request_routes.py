@@ -1,42 +1,20 @@
 from fastapi.testclient import TestClient
 
-from app.fixtures import FIXTURE_WORKSPACE_ID, fixture_workspace
 from app.main import app
-from app.routes.requests import _CANNED
 
 client = TestClient(app)
 
 
-def test_send_matched_node():
-    r = client.post(f"/api/workspaces/{FIXTURE_WORKSPACE_ID}/requests", json={"node_id": "get_task"})
-    assert r.status_code == 200
-    body = r.json()
-    assert body["drift_finding"]["status"] == "matched"
-    assert body["response"]["status_code"] == 200
-    assert body["response"]["body"]["id"] == "t1"
+def test_send_against_a_real_workspace_is_honestly_not_implemented():
+    ws = client.post("/api/workspaces", json={
+        "name": "x", "schema_kind": "openapi",
+        "raw_schema": {"openapi": "3.0.0", "info": {"title": "t", "version": "1"}, "paths": {}},
+    }).json()
+    r = client.post(f"/api/workspaces/{ws['id']}/requests", json={"node_id": "whatever"})
+    assert r.status_code == 501
+    assert "Phase 2" in r.json()["detail"]
 
 
-def test_send_violated_node():
-    # create_task's canned response is deliberately missing the required
-    # "done" field its own declared_response_schema requires.
-    r = client.post(f"/api/workspaces/{FIXTURE_WORKSPACE_ID}/requests", json={"node_id": "create_task"})
-    assert r.status_code == 200
-    body = r.json()
-    assert body["drift_finding"]["status"] == "violated"
-    assert "done" in body["drift_finding"]["detail"]
-    assert "done" not in body["response"]["body"]
-
-
-def test_send_unknown_node_is_404():
-    r = client.post(f"/api/workspaces/{FIXTURE_WORKSPACE_ID}/requests", json={"node_id": "not-a-real-node"})
+def test_send_against_unknown_workspace_is_404():
+    r = client.post("/api/workspaces/00000000-0000-0000-0000-000000000099/requests", json={"node_id": "x"})
     assert r.status_code == 404
-
-
-def test_send_unknown_workspace_is_404():
-    r = client.post("/api/workspaces/not-real/requests", json={"node_id": "get_task"})
-    assert r.status_code == 404
-
-
-def test_canned_responses_cover_exactly_the_fixture_nodes():
-    fixture_ids = {n["id"] for n in fixture_workspace()["nodes"]}
-    assert set(_CANNED) == fixture_ids
