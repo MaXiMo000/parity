@@ -14,10 +14,10 @@ export function App() {
 
   const handleClose = useCallback(() => setSelectedId(null), [])
 
-  function handleCreate(name: string, url: string) {
+  function handleCreate(name: string, kind: 'openapi' | 'graphql', url: string) {
     setBusy(true)
     setError(null)
-    createWorkspace(name, { url })
+    createWorkspace(name, kind, { url })
       .then((created) => getWorkspace(created.id))
       .then((ws) => { setWorkspace(ws); setStatuses({}) })
       .catch((e) => setError(String(e)))
@@ -42,7 +42,7 @@ export function App() {
         </div>
 
         {!workspace && !error && (
-          <p className="idle-hint">Paste a real OpenAPI spec URL above to build its 3D map.</p>
+          <p className="idle-hint">Paste a real OpenAPI or GraphQL URL above to build its 3D map.</p>
         )}
         {error && <p className="idle-hint idle-hint--error">{error}</p>}
 

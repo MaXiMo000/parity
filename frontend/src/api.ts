@@ -1,6 +1,6 @@
 export interface Node {
   id: string
-  kind: 'rest_operation'
+  kind: 'rest_operation' | 'graphql_field'
   method: string | null
   path_template: string | null
   operation_id: string | null
@@ -19,7 +19,7 @@ export interface Edge {
 export interface Workspace {
   id: string
   name: string
-  schema_kind: 'openapi'
+  schema_kind: 'openapi' | 'graphql'
   nodes: Node[]
   edges: Edge[]
 }
@@ -46,12 +46,13 @@ async function json<T>(res: Response): Promise<T> {
 
 export function createWorkspace(
   name: string,
-  source: { url: string } | { rawSchema: object },
+  kind: 'openapi' | 'graphql',
+  source: { url: string } | { rawSchema: object | string },
 ): Promise<{ id: string; name: string; schema_kind: string; node_count: number }> {
   const body =
     'url' in source
-      ? { name, schema_kind: 'openapi', schema_source_url: source.url }
-      : { name, schema_kind: 'openapi', raw_schema: source.rawSchema }
+      ? { name, schema_kind: kind, schema_source_url: source.url }
+      : { name, schema_kind: kind, raw_schema: source.rawSchema }
   return fetch('/api/workspaces', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

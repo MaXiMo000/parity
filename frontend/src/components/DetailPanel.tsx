@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import type { Node, SendResult } from '../api'
+import { nodeLabel } from '../lib/nodeLabel'
 import type { DriftStatus } from '../lib/severity'
 import { useModalPanel } from '../lib/useModalPanel'
 
@@ -41,8 +42,8 @@ export function DetailPanel({ node, status, onClose, onSend }: {
         <button type="button" className="dive__close" onClick={onClose} ref={closeRef} aria-label="Close detail panel">
           Close ✕
         </button>
-        <p className="eyebrow">{node.method} · {node.path_template}</p>
-        <h3 id="detail-title" className="dive__title">{node.operation_id}</h3>
+        <p className="eyebrow">{nodeLabel(node).eyebrow}</p>
+        <h3 id="detail-title" className="dive__title">{nodeLabel(node).title}</h3>
         <p className={`dive__status dive__status--${status}`}>{status}</p>
 
         <button type="button" className="dive__send" onClick={handleSend} disabled={sending}>
