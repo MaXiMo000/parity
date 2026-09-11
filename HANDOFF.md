@@ -71,9 +71,8 @@ this task plan intentionally split them; Phase 1b is a separate upcoming task.)
 ### Decisions
 
 - **Postgres for persistence**: replaced Phase 0's in-memory fixture with
-  durable state. Used SQLAlchemy Core (not ORM helpers) to declare models in
-  raw SQL (`app/models.py`), Alembic for migrations. `user_id` is hardcoded
-  to the system user (id=1) until Phase 3.
+  durable state. Alembic for migrations. `user_id` is hardcoded to the system
+  user (id=1) until Phase 3.
 - **OpenAPI validation exception handling**: `openapi-spec-validator` has
   multiple exception types (e.g. `ValidatorError`, `SpecificationError`,
   spec format errors) that don't share a common base. The catch is deliberately
