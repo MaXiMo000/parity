@@ -36,6 +36,16 @@ describe('guessUrl', () => {
     const ws: Workspace = { ...baseWorkspace, schema_source: 'pasted' }
     expect(guessUrl(ws, restNode)).toBe('')
   })
+
+  it('returns empty string for a REST node with no path_template', () => {
+    const nodeWithNoPath: Node = { ...restNode, path_template: null }
+    expect(guessUrl(baseWorkspace, nodeWithNoPath)).toBe('')
+  })
+
+  it('returns empty string for a malformed http-prefixed schema_source', () => {
+    const ws: Workspace = { ...baseWorkspace, schema_source: 'http://' }
+    expect(guessUrl(ws, restNode)).toBe('')
+  })
 })
 
 describe('guessBody', () => {
