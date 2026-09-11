@@ -83,12 +83,12 @@ def test_invalid_introspection_payload_raises_validation_error():
 def test_fetch_introspection_real_http_post(monkeypatch):
     # "example.invalid" is RFC 2606 reserved and never actually resolves --
     # respx mocks the HTTP layer but not DNS, so fake a public-IP resolution
-    # for our own pre-fetch safety check (app/schema/openapi.py's is_safe_url).
+    # for our own pre-fetch safety check (app/schema/openapi.py's send_pinned).
     monkeypatch.setattr(
         socket, "getaddrinfo",
         lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],
     )
-    respx.post("https://example.invalid/graphql").mock(
+    respx.post("https://93.184.216.34/graphql").mock(
         return_value=httpx.Response(200, json=FIXTURE)
     )
     data = fetch_introspection("https://example.invalid/graphql")
@@ -106,7 +106,7 @@ def test_fetch_introspection_graphql_errors_raise(monkeypatch):
         socket, "getaddrinfo",
         lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],
     )
-    respx.post("https://example.invalid/graphql").mock(
+    respx.post("https://93.184.216.34/graphql").mock(
         return_value=httpx.Response(200, json={"errors": [{"message": "nope"}]})
     )
     with pytest.raises(GraphQLFetchError):
@@ -119,8 +119,52 @@ def test_fetch_introspection_rejects_a_non_object_json_response(monkeypatch):
         socket, "getaddrinfo",
         lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],
     )
-    respx.post("https://example.invalid/graphql").mock(
+    respx.post("https://93.184.216.34/graphql").mock(
         return_value=httpx.Response(200, json=["not", "an", "object"])
     )
+    with pytest.raises(GraphQLFetchError):
+        fetch_introspection("https://example.invalid/graphql")
+
+
+@respx.mock
+def test_fetch_introspection_follows_one_safe_redirect_hop(monkeypatch):
+    monkeypatch.setattr(
+        socket, "getaddrinfo",
+        lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],
+    )
+    respx.post("https://93.184.216.34/old-graphql").mock(
+        return_value=httpx.Response(302, headers={"location": "https://example.invalid/graphql"})
+    )
+    respx.post("https://93.184.216.34/graphql").mock(
+        return_value=httpx.Response(200, json=FIXTURE)
+    )
+    data = fetch_introspection("https://example.invalid/old-graphql")
+    assert data == FIXTURE["data"]
+
+
+@respx.mock
+def test_fetch_introspection_rejects_a_redirect_to_an_unsafe_target(monkeypatch):
+    real_getaddrinfo = socket.getaddrinfo
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        if host == "example.invalid":
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+        return real_getaddrinfo(host, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    respx.post("https://93.184.216.34/redirect-to-internal").mock(
+        return_value=httpx.Response(302, headers={"location": "http://127.0.0.1/secret"})
+    )
+    with pytest.raises(GraphQLFetchError):
+        fetch_introspection("https://example.invalid/redirect-to-internal")
+
+
+@respx.mock
+def test_fetch_introspection_network_failure_raises(monkeypatch):
+    monkeypatch.setattr(
+        socket, "getaddrinfo",
+        lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],
+    )
+    respx.post("https://93.184.216.34/graphql").mock(side_effect=httpx.ConnectError("boom"))
     with pytest.raises(GraphQLFetchError):
         fetch_introspection("https://example.invalid/graphql")

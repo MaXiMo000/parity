@@ -30,49 +30,92 @@ class OpenAPIValidationError(Exception):
     pass
 
 
-def is_safe_url(url: str) -> bool:
-    """Reject obviously-internal targets before fetching — SPEC.md §7.3's
-    same reasoning applied to this phase's own new fetch surface (the
-    OpenAPI source URL), not just Phase 2's later request proxy. This is a
-    baseline guard for THIS phase only -- Phase 2's request proxy will need
-    its own more complete, sandboxed version per SPEC.md §7.3."""
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        return False
-    hostname = parsed.hostname
-    if not hostname:
-        return False
+def _resolve_safe_ip(hostname: str) -> str | None:
+    """Resolves hostname and returns the first candidate IP to pin the
+    real connection to, or None if resolution fails or ANY resolved
+    address is not globally routable -- a hostname that round-robins
+    between a safe and an unsafe address must not pass on a lucky first
+    answer. `is_global` (verified 2026-09-11 against the real
+    `ipaddress` stdlib module) correctly subsumes the old
+    is_private/is_loopback/is_link_local/is_reserved checks AND
+    additionally rejects CGNAT (100.64.0.0/10, RFC 6598) -- a real gap
+    the old checks missed, since CGNAT is real internal space at several
+    cloud providers."""
     try:
         infos = socket.getaddrinfo(hostname, None)
     except socket.gaierror:
-        return False
-    for info in infos:
-        ip = ipaddress.ip_address(info[4][0])
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
-            return False
-    return True
+        return None
+    ips = [info[4][0] for info in infos]
+    if any(not ipaddress.ip_address(ip).is_global for ip in ips):
+        return None
+    return ips[0]
+
+
+def _build_pinned_request(method: str, url: str, **kwargs: Any) -> httpx.Request | None:
+    """Resolves and validates url's hostname via _resolve_safe_ip, then
+    builds a real httpx.Request that connects directly to the validated
+    IP -- closing the DNS-rebinding TOCTOU window between our own safety
+    check and whatever httpx's own independent connection-time
+    resolution would otherwise do. The original hostname is preserved as
+    the Host header and the TLS SNI/certificate-hostname
+    (extensions={"sni_hostname": ...}, verified against the real
+    installed httpx 0.28.1, 2026-09-11) so the request is
+    indistinguishable from an ordinary one to the target server. Returns
+    None if the URL isn't http(s), has no hostname (e.g. a relative
+    redirect Location -- rejected the same way the old is_safe_url
+    rejected it), or the hostname doesn't resolve to an all-safe address
+    set."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return None
+    hostname = parsed.hostname
+    if not hostname:
+        return None
+    ip = _resolve_safe_ip(hostname)
+    if ip is None:
+        return None
+    pinned_url = httpx.URL(url).copy_with(host=ip)
+    headers = {**(kwargs.pop("headers", None) or {}), "Host": hostname}
+    return httpx.Request(method, pinned_url, headers=headers, extensions={"sni_hostname": hostname}, **kwargs)
+
+
+def send_pinned(method: str, url: str, error_cls: type[Exception], **kwargs: Any) -> httpx.Response:
+    """Builds a pinned request (_build_pinned_request) and sends it,
+    manually following at most one redirect hop -- the hop itself
+    re-built and re-validated the same way, so an initially-safe URL
+    that redirects to an internal address is still caught. Shared by
+    fetch_spec (below) and fetch_introspection (app/schema/graphql.py)
+    so both modules' fetch surfaces get identical SSRF-pinning behavior,
+    not two independently-drifting copies. Raises error_cls (each
+    module's own *FetchError) on an unsafe/unresolvable target or a
+    network failure at either hop."""
+    req = _build_pinned_request(method, url, **kwargs)
+    if req is None:
+        raise error_cls(f"{url} is not a permitted target")
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.send(req, follow_redirects=False)
+    except httpx.HTTPError as exc:
+        raise error_cls(f"could not reach {url}: {exc}") from exc
+    if resp.is_redirect:
+        location = resp.headers.get("location")
+        redirect_req = _build_pinned_request(method, location, **kwargs) if location else None
+        if redirect_req is None:
+            raise error_cls(f"{url} redirected to a target that is not permitted")
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                resp = client.send(redirect_req, follow_redirects=False)
+        except httpx.HTTPError as exc:
+            raise error_cls(f"could not reach {location}: {exc}") from exc
+    return resp
 
 
 def fetch_spec(source: str) -> dict[str, Any]:
-    """`source` is a URL. Raises OpenAPIFetchError on any network failure
-    or unparseable body (JSON or YAML, real specs are published as either).
-
-    Redirects are followed manually (at most one hop) so an allowed URL
-    can't silently redirect to an internal target."""
-    if not is_safe_url(source):
-        raise OpenAPIFetchError(f"{source} is not a permitted target")
-    try:
-        resp = httpx.get(source, timeout=15.0, follow_redirects=False)
-    except httpx.HTTPError as exc:
-        raise OpenAPIFetchError(f"could not reach {source}: {exc}") from exc
-    if resp.is_redirect:
-        location = resp.headers.get("location")
-        if not location or not is_safe_url(location):
-            raise OpenAPIFetchError(f"{source} redirected to a target that is not permitted")
-        try:
-            resp = httpx.get(location, timeout=15.0, follow_redirects=False)
-        except httpx.HTTPError as exc:
-            raise OpenAPIFetchError(f"could not reach {location}: {exc}") from exc
+    """`source` is a URL. Raises OpenAPIFetchError on any network
+    failure, an unsafe/unresolvable target (at either the original URL
+    or a redirect hop), a non-200 response, or an unparseable body (JSON
+    or YAML, real specs are published as either)."""
+    resp = send_pinned("GET", source, OpenAPIFetchError)
     if resp.status_code != 200:
         raise OpenAPIFetchError(f"{source} returned HTTP {resp.status_code}")
     try:

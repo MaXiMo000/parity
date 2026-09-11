@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import httpx
 from graphql import (
     GraphQLList,
     GraphQLNonNull,
@@ -18,7 +17,7 @@ from graphql import (
     get_introspection_query,
 )
 
-from app.schema.openapi import is_safe_url
+from app.schema.openapi import send_pinned
 
 _ROOT_TYPES = ("Query", "Mutation")
 
@@ -32,27 +31,13 @@ class GraphQLValidationError(Exception):
 
 
 def fetch_introspection(source: str) -> dict[str, Any]:
-    """`source` is a GraphQL endpoint URL. POSTs the standard introspection
-    query and returns its `data` payload -- the same shape `parse_graphql`
-    accepts directly. Reuses openapi.py's `is_safe_url` (same SSRF-baseline
-    reasoning, SPEC.md §7.3, applied to this new fetch surface) and follows
-    at most one redirect hop manually, re-checked, matching fetch_spec's
-    own pattern."""
-    if not is_safe_url(source):
-        raise GraphQLFetchError(f"{source} is not a permitted target")
-    body = {"query": get_introspection_query()}
-    try:
-        resp = httpx.post(source, json=body, timeout=15.0, follow_redirects=False)
-    except httpx.HTTPError as exc:
-        raise GraphQLFetchError(f"could not reach {source}: {exc}") from exc
-    if resp.is_redirect:
-        location = resp.headers.get("location")
-        if not location or not is_safe_url(location):
-            raise GraphQLFetchError(f"{source} redirected to a target that is not permitted")
-        try:
-            resp = httpx.post(location, json=body, timeout=15.0, follow_redirects=False)
-        except httpx.HTTPError as exc:
-            raise GraphQLFetchError(f"could not reach {location}: {exc}") from exc
+    """`source` is a GraphQL endpoint URL. POSTs the standard
+    introspection query and returns its `data` payload -- the same shape
+    `parse_graphql` accepts directly. Reuses openapi.py's `send_pinned`
+    (same DNS-pinning + SSRF-baseline reasoning, SPEC.md §7.3, applied to
+    this new fetch surface) rather than a second, independently-drifting
+    copy."""
+    resp = send_pinned("POST", source, GraphQLFetchError, json={"query": get_introspection_query()})
     if resp.status_code != 200:
         raise GraphQLFetchError(f"{source} returned HTTP {resp.status_code}")
     try:

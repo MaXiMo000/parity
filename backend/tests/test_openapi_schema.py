@@ -7,6 +7,7 @@ import pytest
 import respx
 
 from app.schema.openapi import (
+    OpenAPIFetchError,
     OpenAPIValidationError,
     fetch_spec,
     parse_openapi,
@@ -64,12 +65,12 @@ def test_invalid_spec_raises_validation_error():
 def test_fetch_spec_real_http_get(monkeypatch):
     # "example.invalid" is RFC 2606 reserved and never actually resolves --
     # respx mocks the HTTP layer but not DNS, so fake a public-IP resolution
-    # for our own pre-fetch safety check (app/schema/openapi.py's is_safe_url).
+    # for our own pre-fetch safety check (app/schema/openapi.py's send_pinned).
     monkeypatch.setattr(
         socket, "getaddrinfo",
         lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],
     )
-    respx.get("https://example.invalid/openapi.json").mock(
+    respx.get("https://93.184.216.34/openapi.json").mock(
         return_value=httpx.Response(200, json=FIXTURE)
     )
     spec = fetch_spec("https://example.invalid/openapi.json")
@@ -84,7 +85,7 @@ def test_fetch_spec_network_failure_raises(monkeypatch):
         socket, "getaddrinfo",
         lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],
     )
-    respx.get("https://example.invalid/openapi.json").mock(side_effect=httpx.ConnectError("boom"))
+    respx.get("https://93.184.216.34/openapi.json").mock(side_effect=httpx.ConnectError("boom"))
     with pytest.raises(OpenAPIFetchError):
         fetch_spec("https://example.invalid/openapi.json")
 
@@ -118,3 +119,41 @@ def test_ref_at_the_requestbody_object_level_is_also_resolved():
     node = nodes[0]
     assert node["declared_request_schema"] is not None
     assert node["declared_request_schema"]["properties"]["name"]["type"] == "string"
+
+
+@respx.mock
+def test_fetch_spec_follows_one_safe_redirect_hop(monkeypatch):
+    monkeypatch.setattr(
+        socket, "getaddrinfo",
+        lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],
+    )
+    respx.get("https://93.184.216.34/old.json").mock(
+        return_value=httpx.Response(302, headers={"location": "https://example.invalid/openapi.json"})
+    )
+    respx.get("https://93.184.216.34/openapi.json").mock(
+        return_value=httpx.Response(200, json=FIXTURE)
+    )
+    spec = fetch_spec("https://example.invalid/old.json")
+    assert spec["info"]["title"] == FIXTURE["info"]["title"]
+
+
+@respx.mock
+def test_fetch_spec_rejects_a_redirect_to_an_unsafe_target(monkeypatch):
+    # Deliberately NOT the blanket lambda every other test in this file
+    # uses -- that fakes every hostname as safe, which would defeat this
+    # specific test's point. Only "example.invalid" (unresolvable in
+    # reality) is faked; a literal IP like 127.0.0.1 needs no DNS at all,
+    # so it resolves for real and is correctly identified as loopback.
+    real_getaddrinfo = socket.getaddrinfo
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        if host == "example.invalid":
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+        return real_getaddrinfo(host, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    respx.get("https://93.184.216.34/redirect-to-internal.json").mock(
+        return_value=httpx.Response(302, headers={"location": "http://127.0.0.1/secret"})
+    )
+    with pytest.raises(OpenAPIFetchError):
+        fetch_spec("https://example.invalid/redirect-to-internal.json")

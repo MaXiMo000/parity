@@ -16,12 +16,12 @@ FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "petstore-openapi.jso
 def test_create_workspace_from_a_real_url(monkeypatch):
     # "example.invalid" is RFC 2606 reserved and never actually resolves --
     # respx mocks the HTTP layer but not DNS, so fake a public-IP resolution
-    # for our own pre-fetch safety check (app/schema/openapi.py's is_safe_url).
+    # for our own pre-fetch safety check (app/schema/openapi.py's send_pinned).
     monkeypatch.setattr(
         socket, "getaddrinfo",
         lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],
     )
-    respx.get("https://example.invalid/openapi.json").mock(return_value=httpx.Response(200, json=FIXTURE))
+    respx.get("https://93.184.216.34/openapi.json").mock(return_value=httpx.Response(200, json=FIXTURE))
     r = client.post("/api/workspaces", json={
         "name": "Petstore", "schema_kind": "openapi",
         "schema_source_url": "https://example.invalid/openapi.json",
@@ -59,7 +59,7 @@ def test_create_workspace_rejects_an_invalid_spec():
 
 @respx.mock
 def test_create_workspace_url_fetch_failure_is_502():
-    respx.get("https://example.invalid/down.json").mock(side_effect=httpx.ConnectError("boom"))
+    respx.get("https://93.184.216.34/down.json").mock(side_effect=httpx.ConnectError("boom"))
     r = client.post("/api/workspaces", json={
         "name": "x", "schema_kind": "openapi", "schema_source_url": "https://example.invalid/down.json",
     })
@@ -131,7 +131,7 @@ def test_create_workspace_from_a_real_graphql_url(monkeypatch):
         socket, "getaddrinfo",
         lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],
     )
-    respx.post("https://example.invalid/graphql").mock(
+    respx.post("https://93.184.216.34/graphql").mock(
         return_value=httpx.Response(200, json=GRAPHQL_FIXTURE)
     )
     r = client.post("/api/workspaces", json={
