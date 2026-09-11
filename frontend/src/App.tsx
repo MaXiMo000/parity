@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react'
 import { createWorkspace, getWorkspace, sendRequest, type Workspace } from './api'
 import { DetailPanel } from './components/DetailPanel'
 import { WorkspaceForm } from './components/WorkspaceForm'
+import { WorkspaceList } from './components/WorkspaceList'
 import type { DriftStatus } from './lib/severity'
 import { Graph } from './scene/Graph'
 
@@ -11,6 +12,7 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   const handleClose = useCallback(() => setSelectedId(null), [])
 
@@ -19,6 +21,15 @@ export function App() {
     setError(null)
     createWorkspace(name, kind, { url })
       .then((created) => getWorkspace(created.id))
+      .then((ws) => { setWorkspace(ws); setStatuses({}); setRefreshKey((k) => k + 1) })
+      .catch((e) => setError(String(e)))
+      .finally(() => setBusy(false))
+  }
+
+  function handleLoad(id: string) {
+    setBusy(true)
+    setError(null)
+    getWorkspace(id)
       .then((ws) => { setWorkspace(ws); setStatuses({}) })
       .catch((e) => setError(String(e)))
       .finally(() => setBusy(false))
@@ -38,6 +49,7 @@ export function App() {
       <div className="scene-root">
         <div className="hud-top">
           <div className="brand">parity<span>.</span></div>
+          <WorkspaceList onLoad={handleLoad} refreshKey={refreshKey} currentId={workspace?.id ?? null} />
           <WorkspaceForm onCreate={handleCreate} busy={busy} />
         </div>
 
