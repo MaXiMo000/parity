@@ -49,3 +49,73 @@ SDL parsing, real Postgres persistence of workspaces/nodes (with the
 Phase-1 default-system-user approach SPEC.md's Phase 1 section describes
 for `workspace.user_id` before real accounts exist). No request-firing
 yet — every node stays honestly `unverified` until Phase 2.
+
+## 2026-09-11: Phase 1a OpenAPI + Postgres persistence — done, live-verified
+
+**What's running**: real Postgres persistence of workspaces and API nodes via
+SQLAlchemy ORM and Alembic migrations, with a Phase-1-spec default system
+user (no user accounts yet — every request uses the single system user until
+OAuth/SSO exists in Phase 3+). Real OpenAPI ingestion: paste a spec URL or raw
+JSON/YAML, the backend fetches and validates with `openapi-spec-validator`,
+resolves every `$ref` inline to flatten the schema graph, extracts operation
+nodes (filtered to first-2xx-only response schemas for simplicity), and stores
+in the database. The `POST /api/workspaces/{id}/requests` route now honestly
+returns 501 (Not Implemented) instead of Phase 0's fake `violated`/`matched`
+result. Live-verified against `https://petstore3.swagger.io/api/v3/openapi.json`:
+real 19 operation nodes + 16 inter-operation reference edges render in 3D,
+schemas in the detail panel are the real resolved `$ref`-flattened inline
+schemas, Send button shows the honest 501. (GraphQL parsing — Phase 1b — is
+**not** in this release; SPEC.md Phase 1 covers both OpenAPI and GraphQL, but
+this task plan intentionally split them; Phase 1b is a separate upcoming task.)
+
+### Decisions
+
+- **Postgres for persistence**: replaced Phase 0's in-memory fixture with
+  durable state. Used SQLAlchemy Core (not ORM helpers) to declare models in
+  raw SQL (`app/models.py`), Alembic for migrations. `user_id` is hardcoded
+  to the system user (id=1) until Phase 3.
+- **OpenAPI validation exception handling**: `openapi-spec-validator` has
+  multiple exception types (e.g. `ValidatorError`, `SpecificationError`,
+  spec format errors) that don't share a common base. The catch is deliberately
+  broad (`except Exception`) — catching specific types would miss real validation
+  failures and misdiagnose them as 500s. This is a known simplification; if
+  we later need finer error classification, the spec-validator library itself
+  would need to be patched upstream or wrapped with a shim.
+- **First-2xx-only schemas**: OpenAPI specs often declare many response codes
+  (4xx, 5xx, default). For MVP clarity, we extract only 2xx responses and take
+  the first one. Revisit this in Phase 2 if request scenarios need 400/404
+  simulation.
+- **No request-sending yet**: the 501 is honest. Firing real requests against
+  the remote API is Phase 2 (Spec §11). Every node remains `unverified` state.
+
+### Verified
+
+- Backend: `cd backend && .venv/bin/python -m pytest -q` — 19 passed (up from
+  Phase 0's 9; new tests cover Postgres persistence, OpenAPI parsing, node
+  extraction, default-user mechanism).
+- Frontend: `cd frontend && npx vitest run` — 5 passed (no new tests; existing
+  render/interaction tests still passing). `npx tsc -b` clean. `npx vite build`
+  successful (expected chunk-size warning for a 3D graph library is not a blocker).
+- **Live-verified in a real browser**: opened the app, clicked the workspace
+  list, pasted `https://petstore3.swagger.io/api/v3/openapi.json`, backend
+  fetched, validated, parsed, and stored 19 nodes in the database; frontend
+  fetched and rendered the nodes in 3D with correct resolved schemas in each
+  node's detail panel; clicked Send on any node, saw the honest 501 response
+  with correct message and formatting.
+
+### Run it locally
+
+```
+cd backend && .venv/bin/python -m pytest -q          # verify persistence + parsing
+.venv/bin/uvicorn app.main:app --port 8123           # start server (auto-creates db)
+
+cd frontend && npm run dev                            # start client
+# browse to localhost:5173, try pasting a spec URL in the workspace editor
+```
+
+### Next (Phase 1b and beyond, SPEC.md §11–13)
+
+Phase 1b will add GraphQL SDL + introspection parsing (same shape: fetch URL,
+validate, extract operation nodes, store). Phase 2 will implement honest
+request-sending against real remote APIs and state tracking (node → verified
+or error). Phase 3+ will add user accounts, OAuth, and per-user workspaces.
