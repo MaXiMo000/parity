@@ -351,3 +351,135 @@ full SSRF-hardened proxy (SPEC.md §7.3's sandboxed-proxy mitigation, not
 yet built), and real drift-checking (comparing live response shapes
 against each node's declared schema) — replacing the honest 501 with
 actual verified/violated states.
+
+## 2026-09-11: Phase 2a: Real Request Execution + REST Drift-Checking — done, live-verified
+
+**What/Why**: Phase 1c closed out schema-fetching SSRF hardening and the
+workspace picker; the honest 501 from every prior phase was still the only
+thing the Send button could produce. This phase replaces it with real
+request execution end to end: a hardened outbound proxy, a real curl
+parser, REST request-to-node matching, and real `jsonschema`-based drift
+validation — wired into the real routes.
+
+**What was built**:
+
+- **SSRF-guarded outbound proxy** (`app/proxy/ssrf_guard.py`,
+  `app/proxy/client.py`): extracted from Phase 1c's schema-fetch guard
+  into its own module (closing the gap that phase's HANDOFF explicitly
+  flagged), reused for real request execution — `fire_request` resolves
+  and validates the target host the same DNS-pinned way schema-fetching
+  does before connecting, so a request aimed at link-local/private/CGNAT
+  address space is rejected before any bytes leave the proxy.
+- **Real curl parser** (`app/proxy/curl_parser.py`): a small hand-rolled
+  parser over stdlib `shlex.split`, covering exactly the flag set SPEC.md
+  §7.1 names (`-X`/`--request`, `-H`/`--header`, `-d`/`--data`/
+  `--data-raw`/`--data-binary`, `-u`/`--user`, `-G`, `-b`/`--cookie`).
+  `uncurl` (the library SPEC.md §7.1 said to try first) was evaluated
+  directly against real devtools-shaped curl commands and rejected for a
+  real, verified reason: it conflates `-b` with `--data-binary` (real
+  curl's `-b` is `--cookie`; confirmed by reading uncurl's own argparse
+  source — `-b` is never mapped to cookies there) and has no `-G` support
+  at all, both flags this project explicitly needs. The hand-rolled
+  parser is the real decision made against that real finding, not a
+  fallback taken on faith.
+- **REST request-matching** (`app/matching.py`): matches a fired
+  request's method + path back to the Node it corresponds to, scoring a
+  literal path segment above a templated one at the same position.
+  Verified against a real ambiguity in the Petstore fixture itself:
+  `/pet/findByStatus`, `/pet/findByTags`, and `/pet/{petId}` are all real
+  2-segment `GET` paths under `/pet` — a naive segment-count-only match
+  would let `/pet/{petId}` wrongly claim a request meant for
+  `/pet/findByStatus`. Live-verified below: a real request to
+  `/pet/findByStatus?status=available` matched the real `findByStatus`
+  node, not `/pet/{petId}`.
+- **REST drift-checking** (`app/drift/rest.py`): validates the real
+  response body against the matched node's declared response schema using
+  the real `jsonschema` library (not a hand-rolled shape comparison)
+  against the real `$ref`-resolved JSON Schema Phase 1a's OpenAPI parser
+  already produces. Returns `matched`, `violated` (with a real
+  `json_path`/message detail), or `unverified_no_schema` when the node has
+  no declared schema to check against; `unverified_no_match` (a fired
+  request that matched no known node) is decided by the route, not this
+  function.
+- **Real routes** (`app/routes/requests.py`, `app/routes/curl_parse.py`):
+  `POST /api/workspaces/{id}/requests` now fires a real proxied request,
+  matches it (REST workspaces only — GraphQL matching is Phase 2b), checks
+  drift, and persists `Request`/`Response`/`DriftFinding` rows with
+  headers redacted before storage, replacing the 501 entirely. `GET
+  .../requests` and `GET .../nodes/{node_id}/history` expose that
+  persisted history. `POST /api/curl-parse` exposes the curl parser as its
+  own endpoint.
+- **GraphQL workspaces**: requests fire for real through the same
+  SSRF-guarded proxy, but are honestly recorded as `unverified_no_match` —
+  no REST-shaped matching or drift-checking is applied to them. Phase 2b
+  adds real GraphQL matching + drift validation.
+
+### Verified
+
+- Backend: `cd backend && .venv/bin/python -m pytest -q` — **84 passed**
+  (real output, confirmed 2026-09-11 during this phase's own verification
+  pass, run a second time independently of Task 6's own count).
+- **Live-verified against the backend directly (no frontend/browser
+  involved — see the explicit note below)**, with Postgres via `docker
+  compose up -d` + `alembic upgrade head`, and `uvicorn app.main:app
+  --port 8123` running against it:
+  - `POST /api/workspaces` with `schema_source_url:
+    https://petstore3.swagger.io/api/v3/openapi.json` → `201`, real 19
+    nodes, workspace id `d27a8cbd-6704-468c-b55d-2abcd4427744`.
+  - `POST /api/curl-parse` with `curl -X GET
+    'https://petstore3.swagger.io/api/v3/pet/findByStatus?status=available'`
+    → `{"method":"GET","url":"https://petstore3.swagger.io/api/v3/pet/findByStatus?status=available","headers":{},"body":null}`,
+    correctly parsed with no headers/body.
+  - `POST /api/workspaces/{id}/requests` with that same GET against the
+    **real, live** Petstore API → a real `200` from the live API, the
+    request's `node_id` correctly resolved to the real `findByStatus` node
+    (`229e0a6a-09d1-4fd2-af69-1f5ea63f1d02`, confirmed via a follow-up
+    `GET /api/workspaces/{id}` showing `path_template:
+    "/pet/findByStatus"`) — not the ambiguous `/pet/{petId}` node — and a
+    real `drift_finding`. **The live Petstore API's actual current
+    response did not match its own declared schema**: `drift_finding.status`
+    came back `"violated"`, detail `"$[289]: 'name' is a required
+    property"` — one entry in the live, shared Petstore demo dataset (a
+    publicly-writable sandbox other users' test traffic also mutates) is
+    genuinely missing its schema-required `name` field. This is a real,
+    unforced result of comparing a real live response to Petstore's own
+    real declared schema, not an artifact of this project's code — it is
+    reported exactly as it came back.
+  - `GET /api/workspaces/{id}/requests` → the one request above, with its
+    real `node_id` and timestamp.
+  - `GET /api/workspaces/{id}/nodes/{node_id}/history` → the one
+    `violated` drift finding above, confirming persisted history.
+  - SSRF guard confirmed live (not just in tests): `POST
+    /api/workspaces/{id}/requests` targeting `http://169.254.169.254/`
+    (the cloud metadata address) returned a real `502`:
+    `{"detail":"http://169.254.169.254/ is not a permitted target"}`.
+  - `uvicorn` was stopped after this verification pass; Postgres
+    (`docker compose`) was left running, as instructed.
+
+**This is backend-level verification only, not browser/frontend
+verification.** The frontend still shows the Phase 0/1 UI: a bare "Send"
+button with no way to specify method, URL, headers, or body. Clicking it
+will currently fail, because it still calls the old
+`sendRequest(workspaceId, nodeId)` shape against this phase's new
+`{method, url, headers, body}` request body shape. This is a real,
+deliberate, temporary state, not an oversight — Phase 2b replaces the
+frontend's Send flow with a real request-builder panel that calls this
+plan's real endpoint shape (curl-paste UI + history view, SPEC.md §8.4).
+
+### Known gaps (carried over / still open)
+
+- Carried from Phase 1b/1c: GraphQL nodes still render with no edges in
+  the 3D graph (SPEC.md §8.3 frontend work, not yet attempted).
+- GraphQL workspaces: requests fire for real through the SSRF-guarded
+  proxy, but every result is honestly `unverified_no_match` — no
+  GraphQL-shaped request matching or drift-checking exists yet.
+- The frontend Send button is currently broken against the new endpoint
+  shape (see above) — expected and temporary, not a regression to fix in
+  this phase.
+
+### Next (Phase 2b, SPEC.md §10)
+
+GraphQL request-matching + drift validation (closing the gap this phase
+leaves as honest `unverified_no_match`), and the frontend's real
+request-builder panel + curl-paste UI + history view (SPEC.md §8.4),
+replacing the currently-broken bare Send button.
