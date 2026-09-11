@@ -6,7 +6,10 @@ import httpx
 import respx
 from fastapi.testclient import TestClient
 
+from app.db import SessionLocal
 from app.main import app
+from app.models import Node, Request
+from app.models import Response as ResponseModel
 
 client = TestClient(app)
 FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "petstore-openapi.json").read_text())
@@ -131,3 +134,98 @@ def test_node_history_for_unknown_node_is_404():
     }).json()
     r = client.get(f"/api/workspaces/{ws['id']}/nodes/00000000-0000-0000-0000-000000000099/history")
     assert r.status_code == 404
+
+
+@respx.mock
+def test_sensitive_headers_are_redacted_when_persisted_but_not_when_sent(monkeypatch):
+    _fake_getaddrinfo(monkeypatch)
+    ws = client.post("/api/workspaces", json={
+        "name": "Petstore", "schema_kind": "openapi", "raw_schema": FIXTURE,
+    }).json()
+
+    route = respx.get("https://93.184.216.34/api/v3/pet/1").mock(
+        return_value=httpx.Response(
+            200, json={"id": 1, "name": "Fido", "photoUrls": []},
+            headers={"Set-Cookie": "session=abc123"},
+        )
+    )
+    r = client.post(f"/api/workspaces/{ws['id']}/requests", json={
+        "method": "GET", "url": "https://example.invalid/api/v3/pet/1",
+        "headers": {"Authorization": "Bearer supersecret123"}, "body": None,
+    })
+    assert r.status_code == 201
+
+    # the real outbound call must have received the REAL header
+    sent = route.calls.last.request.headers
+    assert sent["authorization"] == "Bearer supersecret123"
+
+    # but the persisted rows must be redacted
+    session = SessionLocal()
+    try:
+        req_row = session.query(Request).filter(Request.workspace_id == ws["id"]).one()
+        assert req_row.headers["Authorization"] == "[REDACTED]"
+        resp_row = session.query(ResponseModel).filter(ResponseModel.request_id == req_row.id).one()
+        assert any(k.lower() == "set-cookie" and v == "[REDACTED]" for k, v in resp_row.headers.items())
+    finally:
+        session.close()
+
+
+@respx.mock
+def test_send_against_a_graphql_workspace_is_honestly_unverified_no_match(monkeypatch):
+    _fake_getaddrinfo(monkeypatch)
+    ws = client.post("/api/workspaces", json={
+        "name": "Pets (GraphQL)", "schema_kind": "graphql",
+        "raw_schema": "type Query { pet(id: ID!): String }",
+    }).json()
+    respx.post("https://93.184.216.34/graphql").mock(return_value=httpx.Response(200, json={"data": {"pet": "Fido"}}))
+    r = client.post(f"/api/workspaces/{ws['id']}/requests", json={
+        "method": "POST", "url": "https://example.invalid/graphql", "headers": {}, "body": '{"query":"{ pet(id: 1) }"}',
+    })
+    assert r.status_code == 201
+    body = r.json()
+    assert body["request"]["node_id"] is None
+    assert body["drift_finding"]["status"] == "unverified_no_match"
+
+
+@respx.mock
+def test_call_count_increments_and_persists_on_a_matched_request(monkeypatch):
+    _fake_getaddrinfo(monkeypatch)
+    ws = client.post("/api/workspaces", json={
+        "name": "Petstore", "schema_kind": "openapi", "raw_schema": FIXTURE,
+    }).json()
+    node_id = next(n["id"] for n in client.get(f"/api/workspaces/{ws['id']}").json()["nodes"] if n["operation_id"] == "getPetById")
+    respx.get("https://93.184.216.34/api/v3/pet/1").mock(return_value=httpx.Response(200, json={"id": 1, "name": "Fido", "photoUrls": []}))
+    client.post(f"/api/workspaces/{ws['id']}/requests", json={
+        "method": "GET", "url": "https://example.invalid/api/v3/pet/1", "headers": {}, "body": None,
+    })
+
+    session = SessionLocal()
+    try:
+        node = session.get(Node, node_id)
+        assert node.call_count == 1
+    finally:
+        session.close()
+
+
+@respx.mock
+def test_response_body_is_parsed_in_api_response_but_raw_text_when_persisted(monkeypatch):
+    _fake_getaddrinfo(monkeypatch)
+    ws = client.post("/api/workspaces", json={
+        "name": "Petstore", "schema_kind": "openapi", "raw_schema": FIXTURE,
+    }).json()
+    respx.get("https://93.184.216.34/api/v3/pet/1").mock(return_value=httpx.Response(200, json={"id": 1, "name": "Fido", "photoUrls": []}))
+    r = client.post(f"/api/workspaces/{ws['id']}/requests", json={
+        "method": "GET", "url": "https://example.invalid/api/v3/pet/1", "headers": {}, "body": None,
+    })
+    body = r.json()
+    assert isinstance(body["response"]["body"], dict)
+    assert body["response"]["body"]["name"] == "Fido"
+
+    session = SessionLocal()
+    try:
+        req_row = session.query(Request).filter(Request.workspace_id == ws["id"]).one()
+        resp_row = session.query(ResponseModel).filter(ResponseModel.request_id == req_row.id).one()
+        assert isinstance(resp_row.body, str)
+        assert json.loads(resp_row.body)["name"] == "Fido"
+    finally:
+        session.close()
