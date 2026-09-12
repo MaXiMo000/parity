@@ -18,7 +18,9 @@ export function App() {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null | undefined>(undefined)
 
   useEffect(() => {
-    getCurrentUser().then(setCurrentUser).catch(() => setCurrentUser(null))
+    getCurrentUser()
+      .then(setCurrentUser)
+      .catch((e) => { setError(String(e)); setCurrentUser(null) })
   }, [])
 
   const handleClose = useCallback(() => setSelectedId(null), [])
@@ -48,7 +50,14 @@ export function App() {
   }
 
   function handleLogout() {
-    logout().then(() => setCurrentUser(null))
+    logout().then(() => {
+      setCurrentUser(null)
+      setWorkspace(null)
+      setStatuses({})
+      setSelectedId(null)
+      setError(null)
+      setShowHistory(false)
+    })
   }
 
   const selected = workspace?.nodes.find((n) => n.id === selectedId) ?? null
@@ -61,6 +70,7 @@ export function App() {
     return (
       <div className="app auth-gate">
         <div className="brand">parity<span>.</span></div>
+        {error && <p className="idle-hint idle-hint--error">{error}</p>}
         <a className="auth-gate__button" href={GITHUB_LOGIN_URL}>Sign in with GitHub</a>
       </div>
     )
