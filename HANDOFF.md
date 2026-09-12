@@ -783,3 +783,145 @@ Encrypted per-workspace credential storage (so users can attach real
 auth headers/tokens to a workspace without them landing in plaintext),
 then Phase 3c: the final visual-identity palette/type pass and
 deploy-readiness for Render.
+
+## 2026-09-12: Phase 3b: Encrypted Per-Workspace Credential Storage — done, verified at the API level
+
+**What/Why**: Phase 3a left every workspace-scoped route real and
+per-user, but with no way to attach a real auth credential to the target
+API a workspace tests against — a real integration test against
+anything requiring auth was impossible. This phase adds real
+Fernet-encrypted, per-workspace credential storage: a header name +
+value a user sets once, auto-injected into every fired request, never
+readable back out in plaintext.
+
+**What was built**:
+
+- **Real Fernet encryption at rest** (`backend/app/crypto.py`): a
+  server-held `FERNET_KEY` from the environment, **required at boot in
+  every environment, dev included — there is no default**, matching
+  `SESSION_SECRET_KEY`'s own discipline. This defends against exactly
+  one threat, stated plainly and not implied as more (SPEC.md §7.4): a
+  database dump alone can't recover a stored credential. Rotating the
+  key is a one-way action — it permanently locks out every credential
+  already stored under the old key (SPEC.md §12); there is no
+  re-encrypt-everything migration path, by design.
+- **Header-name/value split, not a single fixed header**:
+  `Workspace.credential_header_name` + `Workspace.encrypted_credential`
+  let a user name *which* header carries the credential, not just
+  supply a value for a hardcoded `Authorization`. This is a real
+  requirement, not speculative flexibility — this project's own
+  reference fixture, the Petstore API, authenticates via a custom
+  `api_key` header, not `Authorization`; a design that only supported
+  one fixed header name would fail on the exact API this whole project
+  tests against. `PUT /api/workspaces/{id}/credential` sets both;
+  `DELETE` clears both; `GET /api/workspaces/{id}` only ever reports
+  `has_credential` (bool) and `credential_header_name` (string) —
+  never the decrypted value.
+- **Real injection + real redaction gap found and closed during this
+  plan's own self-review** (`backend/app/routes/requests.py`,
+  `backend/app/redact.py`): `POST /api/workspaces/{id}/requests`
+  decrypts the stored credential and injects it under its configured
+  header name before firing, unless the caller already supplied that
+  header themselves. The persisted copy must be redacted the same as
+  any other sensitive header — but `redact_headers`'s `SENSITIVE_HEADERS`
+  set (`app/proxy/ssrf_guard.py`) is a fixed list of well-known names
+  (`authorization`, `cookie`, `proxy-authorization`, `set-cookie`,
+  `x-api-key`) and a user-chosen name like `api_key` isn't in it. Left
+  unfixed, the real decrypted secret would have been written to
+  Postgres verbatim on every request. This was caught and fixed during
+  this plan's own self-review, not left for a task review to catch:
+  `send_request` now explicitly redacts whichever header name the
+  workspace's own credential config names, on top of the fixed set,
+  before persisting the `Request` row. Live-verified below, not just
+  unit-tested.
+- **Frontend credential UI** (`frontend/src/components/CredentialPanel.tsx`,
+  wired into `App.tsx` via a new "Credential" toggle button): a form to
+  set/clear the header name + value, showing only `has_credential` /
+  `credential_header_name` back — never a value the backend never
+  returns in the first place. `showCredential` resets on logout, the
+  same discipline `showHistory` already had (a Task 2 review finding,
+  fixed in that same task).
+
+### Verified
+
+- Backend: `cd backend && .venv/bin/python -m pytest -q` — **132 passed**
+  (real output, confirmed 2026-09-12 during this task's own run; up from
+  Phase 3a's 120).
+- Frontend: `cd frontend && npx vitest run` — **15 passed across 4 test
+  files** (real output, confirmed 2026-09-12; unchanged from Phase 3a's
+  count — the credential UI is covered by this task's own live
+  verification below rather than new component tests).
+- **Live-verified against the real running backend + real Postgres +
+  real Fernet encryption, over real HTTP** (`docker compose up -d` +
+  `alembic upgrade head`, `uvicorn` on `:8123` with a real freshly-generated
+  `FERNET_KEY`, driven with `curl` and a manually-signed session cookie —
+  the same real technique `tests/conftest.py`'s `login_as` helper uses,
+  not a real GitHub login; see the honesty note below for why):
+  - Created a real workspace ("Petstore live") against
+    `https://petstore3.swagger.io/api/v3/openapi.json` — real 19 nodes,
+    same known count as every prior phase's Petstore verification.
+  - `PUT /api/workspaces/{id}/credential` with `{"header_name": "api_key",
+    "value": "live-verify-test-value"}` → `{"status":"ok"}`.
+  - `GET /api/workspaces/{id}` → `has_credential: true`,
+    `credential_header_name: "api_key"` — confirming the value itself is
+    never reported back, only its presence and header name.
+  - Fired a real `GET` against the real, live Petstore
+    `/pet/findByStatus?status=available` endpoint (no real auth needed
+    for this call — the point was confirming header injection and
+    redaction, not that Petstore accepts the fake credential) with no
+    `api_key` header supplied by the caller. Got a real `200` back from
+    the live API with the real current pet list, and a real
+    `drift_finding.status: "violated"` (`"$[3]: 'name' is a required
+    property"`) — the live, shared Petstore demo dataset again has an
+    entry missing a schema-required field, the same kind of real,
+    unforced finding Phase 2a's own verification reported, not an
+    artifact of this project's code.
+  - Inspected the persisted `Request` row directly (same technique
+    Task 1's own tests use): `row.headers['api_key']` was exactly
+    `"[REDACTED]"`, never `"live-verify-test-value"` — confirming the
+    fixed-redaction-gap fix above holds against a real running server
+    and real Postgres row, not just the test suite.
+  - `GET /api/auth/me` with no cookie returned a real `401`
+    (`{"detail":"not authenticated"}`) — the same logged-out shape
+    `App.tsx`'s `currentUser === null` branch expects, which renders the
+    "Sign in with GitHub" gate instead of the workspace UI.
+  - Stopped the background `uvicorn` and `npm run dev` processes
+    afterward; Postgres (`docker compose`) was left running, as
+    instructed.
+
+### Full UI-driven live verification: not completed, same as Phase 3a
+
+**Stated exactly, not glossed over**: this task did not drive a real
+browser through a real GitHub login and then click through the
+credential UI end to end, because no real GitHub OAuth App is
+registered in this environment yet — the identical gap Phase 3a's own
+HANDOFF section named and left as the one remaining manual step (see
+`AUTH_SETUP.md`). Verification for this phase stayed at two levels
+instead, matching Phase 3a's own Task 4 honesty discipline exactly:
+
+1. **Real backend/API-level verification** (above): the real encryption,
+   injection, and redaction pipeline, exercised over real HTTP against
+   the real running server and real Postgres, using a manually-signed
+   session cookie in place of a real GitHub login.
+2. **Frontend logic read, not driven**: confirmed by reading
+   `frontend/src/App.tsx`'s early-return logic directly — `currentUser
+   === undefined` shows a loading state, `currentUser === null` shows
+   the "Sign in with GitHub" gate, and only a real logged-in user
+   reaches the workspace UI (and, within it, the credential panel) at
+   all — rather than by clicking through it in a real browser.
+
+Neither the credential panel's own click-through UI nor a real GitHub
+consent-screen round trip has been driven end to end in a real browser.
+A human with a real GitHub account completing `AUTH_SETUP.md`'s
+registration step would unblock that the same way it would unblock
+Phase 3a's own remaining gap — this is one shared blocker, not two
+separate ones.
+
+### Next (Phase 3c, SPEC.md §8.2, §12)
+
+The final visual-identity palette/type pass, and deploy-readiness:
+`Dockerfile`/`render.yaml`/env docs, plus resolving the deploy-topology
+decisions Phase 3a's own HANDOFF section left open — which real domains
+the frontend and backend will actually live on, and updating the
+frontend's currently-hardcoded relative `/api/...` paths accordingly so
+a split-origin deploy actually works.

@@ -44,3 +44,15 @@ cd frontend && npm run dev
 Open `http://localhost:5173`, click **Sign in with GitHub**, approve the
 real consent screen, and confirm you land back in the app with your real
 GitHub username showing in the top bar.
+
+## Generating a FERNET_KEY (for encrypted credential storage, Phase 3b)
+
+```bash
+export FERNET_KEY="$(python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+```
+
+Like `SESSION_SECRET_KEY`, this is required at boot in every environment
+(dev included) — there is no default. Unlike a session secret, rotating
+this key permanently locks you out of any credential already stored
+under the old one (SPEC.md §12) — generate it once and keep it, the same
+discipline as any real secrets-manager key.
