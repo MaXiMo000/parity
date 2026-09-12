@@ -20,9 +20,11 @@ def test_login_redirects_to_a_real_shaped_github_authorize_url():
 
 
 def test_callback_rejects_a_state_mismatch():
-    # Never having called /login means no oauth_state is in the session --
-    # a callback claiming any state at all must be rejected.
-    r = client.get("/api/auth/github/callback?code=abc&state=whatever-not-real")
+    # A genuinely fresh client -- never having called /login means no
+    # oauth_state is in the session -- a callback claiming any state at
+    # all must be rejected.
+    fresh_client = TestClient(app)
+    r = fresh_client.get("/api/auth/github/callback?code=abc&state=whatever-not-real")
     assert r.status_code == 400
 
 
@@ -76,6 +78,27 @@ def test_me_with_a_signed_test_session_works():
     r = fresh_client.get("/api/auth/me")
     assert r.status_code == 200
     assert r.json()["username"] == "testuser"
+
+
+def test_two_concurrent_login_attempts_can_both_complete():
+    fresh_client = TestClient(app)
+    location1 = fresh_client.get("/api/auth/github/login", follow_redirects=False).headers["location"]
+    state1 = location1.split("state=")[1].split("&")[0]
+    location2 = fresh_client.get("/api/auth/github/login", follow_redirects=False).headers["location"]
+    state2 = location2.split("state=")[1].split("&")[0]
+    assert state1 != state2
+
+    with respx.mock:
+        respx.post("https://github.com/login/oauth/access_token").mock(
+            return_value=httpx.Response(200, json={"access_token": "gho_fake", "token_type": "bearer"})
+        )
+        respx.get("https://api.github.com/user").mock(
+            return_value=httpx.Response(200, json={"id": 111222, "login": "two-tabs-user"})
+        )
+        # Completing the FIRST tab's flow (state1) must still succeed even
+        # though a second /login call already happened.
+        r = fresh_client.get(f"/api/auth/github/callback?code=c1&state={state1}", follow_redirects=False)
+        assert r.status_code in (302, 307)
 
 
 def test_logout_clears_the_session():

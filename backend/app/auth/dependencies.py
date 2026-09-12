@@ -7,6 +7,8 @@ someone else's workspace id can't even confirm that id exists."""
 
 from __future__ import annotations
 
+import uuid
+
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
@@ -25,6 +27,10 @@ def get_current_user(request: Request, session: Session = Depends(get_session)) 
 
 
 def get_owned_workspace(workspace_id: str, current_user: User, session: Session) -> Workspace:
+    try:
+        uuid.UUID(workspace_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="unknown workspace id")
     workspace = session.get(Workspace, workspace_id)
     if workspace is None or workspace.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="unknown workspace id")

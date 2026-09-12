@@ -194,6 +194,16 @@ def test_node_history_for_unknown_node_is_404():
     assert r.status_code == 404
 
 
+def test_node_history_with_a_malformed_node_id_is_404_not_a_crash(monkeypatch):
+    _fake_getaddrinfo(monkeypatch)
+    ws = client.post("/api/workspaces", json={
+        "name": "x", "schema_kind": "openapi",
+        "raw_schema": {"openapi": "3.0.0", "info": {"title": "t", "version": "1"}, "paths": {}},
+    }).json()
+    r = client.get(f"/api/workspaces/{ws['id']}/nodes/not-a-real-uuid/history")
+    assert r.status_code == 404
+
+
 @respx.mock
 def test_sensitive_headers_are_redacted_when_persisted_but_not_when_sent(monkeypatch):
     _fake_getaddrinfo(monkeypatch)

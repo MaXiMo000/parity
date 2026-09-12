@@ -7,6 +7,7 @@ before storage. Replaces Phase 0/1's honest 501 entirely."""
 from __future__ import annotations
 
 import json
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -125,6 +126,10 @@ def list_requests(workspace_id: str, session: Session = Depends(get_session), cu
 @router.get("/{workspace_id}/nodes/{node_id}/history")
 def node_history(workspace_id: str, node_id: str, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)) -> list[dict]:
     get_owned_workspace(workspace_id, current_user, session)  # 404s before even checking the node exists, if the workspace isn't the caller's
+    try:
+        uuid.UUID(node_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="unknown node id")
     node = session.get(Node, node_id)
     if node is None or node.workspace_id != workspace_id:
         raise HTTPException(status_code=404, detail="unknown node id")

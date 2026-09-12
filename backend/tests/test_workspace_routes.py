@@ -113,6 +113,11 @@ def test_get_unknown_workspace_is_404():
     assert r.status_code == 404
 
 
+def test_get_a_malformed_workspace_id_is_404_not_a_crash():
+    r = client.get("/api/workspaces/not-a-real-uuid")
+    assert r.status_code == 404
+
+
 GRAPHQL_SDL = """
 type Query {
   pet(id: ID!): Pet

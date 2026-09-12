@@ -756,6 +756,27 @@ it, because it's scoped to a user id no real GitHub account will ever
 have. Anyone testing locally with old workspace data simply won't see it
 after logging in for real. This is expected, not a regression.
 
+### Final-review fix wave (2026-09-12): `PARITY_ENV` and what Phase 3c still owns
+
+The whole-branch final review found this phase's deploy story was
+internally contradictory: the session cookie was hardcoded to
+`SameSite=Lax`/no-`Secure`, which a real split-origin deploy (frontend
+and backend on different domains, per SPEC.md's own deploy-readiness
+goal) cannot use, while `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET`/
+`GITHUB_CALLBACK_URL` being merely optional meant a real deploy missing
+one would fail confusingly on the first OAuth-touching request instead
+of at boot. This branch adds `PARITY_ENV` (default `"development"`) as
+the single explicit flag for both: it switches the session cookie to
+`SameSite=None`+`Secure` and requires `SESSION_SECRET_KEY` when set to
+`"production"`, and — regardless of `PARITY_ENV` — now makes a missing
+GitHub OAuth env var a boot-time `RuntimeError` instead of a
+first-request 500. **Phase 3c must set `PARITY_ENV=production` in its
+deploy config.** This branch does not decide the actual deploy topology
+(subdomains of one apex vs. two separate platform-assigned domains) —
+that decision, and pointing the frontend's API base at the real backend
+URL (currently hardcoded to relative `/api/...` paths, which only work
+same-origin), are still Phase 3c's to make.
+
 ### Next (Phase 3b, SPEC.md §10)
 
 Encrypted per-workspace credential storage (so users can attach real

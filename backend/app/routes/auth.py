@@ -22,16 +22,27 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 @router.get("/github/login")
 def github_login(request: Request):
     state = new_state()
-    request.session["oauth_state"] = state
+    # A list, not a single scalar -- opening "Sign in with GitHub" in two
+    # tabs before completing either used to make the FIRST tab's callback
+    # fail, since the second /login call overwrote the only stored state
+    # in the shared session cookie (Phase 3a's final review, finding I5,
+    # reproduced live). Capped so a user who abandons many login attempts
+    # doesn't grow the session cookie unboundedly.
+    states = request.session.setdefault("oauth_states", [])
+    states.append(state)
+    del states[:-5]
+    request.session["oauth_states"] = states
     redirect_uri = os.environ["GITHUB_CALLBACK_URL"]
     return RedirectResponse(build_authorize_url(redirect_uri, state))
 
 
 @router.get("/github/callback")
 def github_callback(request: Request, code: str, state: str, session: Session = Depends(get_session)):
-    expected_state = request.session.pop("oauth_state", None)
-    if not expected_state or expected_state != state:
+    states = request.session.get("oauth_states", [])
+    if state not in states:
         raise HTTPException(status_code=400, detail="invalid OAuth state")
+    states.remove(state)
+    request.session["oauth_states"] = states
 
     redirect_uri = os.environ["GITHUB_CALLBACK_URL"]
     try:
@@ -40,7 +51,9 @@ def github_callback(request: Request, code: str, state: str, session: Session = 
     except GitHubOAuthError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    github_id = str(profile.get("id"))
+    if not profile.get("id"):
+        raise HTTPException(status_code=502, detail="GitHub profile response is missing an id")
+    github_id = str(profile["id"])
     username = profile.get("login") or github_id
     user = session.query(User).filter(User.github_id == github_id).one_or_none()
     if user is None:
