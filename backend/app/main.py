@@ -26,7 +26,7 @@ _IS_PRODUCTION = PARITY_ENV == "production"
 
 if _IS_PRODUCTION and os.environ.get("SESSION_SECRET_KEY") is None:
     raise RuntimeError("SESSION_SECRET_KEY is required when PARITY_ENV=production (see AUTH_SETUP.md)")
-for _required_var in ("GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "GITHUB_CALLBACK_URL"):
+for _required_var in ("GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "GITHUB_CALLBACK_URL", "FERNET_KEY"):
     if os.environ.get(_required_var) is None:
         raise RuntimeError(f"{_required_var} is required (see AUTH_SETUP.md) -- refusing to boot without it")
 

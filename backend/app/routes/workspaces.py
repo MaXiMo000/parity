@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user, get_owned_workspace
+from app.crypto import encrypt_credential
 from app.db import get_session
 from app.edges import compute_rest_edges
 from app.models import Node, User, Workspace
@@ -102,6 +103,30 @@ def get_workspace(workspace_id: str, session: Session = Depends(get_session), cu
     return {
         "id": workspace.id, "name": workspace.name, "schema_kind": workspace.schema_kind,
         "base_path": workspace.base_path, "schema_source": workspace.schema_source,
+        "has_credential": workspace.encrypted_credential is not None,
+        "credential_header_name": workspace.credential_header_name,
         "nodes": node_dicts,
         "edges": [{"from_node": a, "to_node": b} for a, b in edges],
     }
+
+
+@router.put("/{workspace_id}/credential")
+def set_credential(workspace_id: str, body: dict, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)) -> dict:
+    workspace = get_owned_workspace(workspace_id, current_user, session)
+    header_name = body.get("header_name")
+    value = body.get("value")
+    if not header_name or not value:
+        raise HTTPException(status_code=422, detail="header_name and value are required")
+    workspace.credential_header_name = header_name
+    workspace.encrypted_credential = encrypt_credential(value)
+    session.commit()
+    return {"status": "ok"}
+
+
+@router.delete("/{workspace_id}/credential")
+def clear_credential(workspace_id: str, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)) -> dict:
+    workspace = get_owned_workspace(workspace_id, current_user, session)
+    workspace.credential_header_name = None
+    workspace.encrypted_credential = None
+    session.commit()
+    return {"status": "ok"}

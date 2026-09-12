@@ -22,6 +22,7 @@ os.environ.setdefault("SESSION_SECRET_KEY", TEST_SESSION_SECRET)
 os.environ.setdefault("GITHUB_CLIENT_ID", "test-client-id")
 os.environ.setdefault("GITHUB_CLIENT_SECRET", "test-client-secret")
 os.environ.setdefault("GITHUB_CALLBACK_URL", "http://testserver/api/auth/github/callback")
+os.environ.setdefault("FERNET_KEY", "L3RY_MnUUvW0V0jjkBaLpN7RB1P_yBc-K4jSAG6ZmA0=")
 
 
 @pytest.fixture(autouse=True)

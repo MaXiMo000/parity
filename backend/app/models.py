@@ -42,6 +42,7 @@ class Workspace(Base):
     base_path: Mapped[str] = mapped_column(Text, default="")  # OpenAPI servers[0].url's path component (e.g. "/api/v3"); "" for GraphQL or a spec with no servers entry
     raw_schema: Mapped[dict | str] = mapped_column(JSONB)  # dict (OpenAPI/introspection) or str (pasted SDL)
     encrypted_credential: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    credential_header_name: Mapped[str | None] = mapped_column(String, nullable=True)  # e.g. "Authorization" or "api_key" -- SPEC.md §7.4
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 

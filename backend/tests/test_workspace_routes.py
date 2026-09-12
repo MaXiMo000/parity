@@ -178,3 +178,43 @@ def test_create_workspace_rejects_invalid_schema_kind():
         "name": "x", "schema_kind": "soap", "raw_schema": "irrelevant",
     })
     assert r.status_code == 422
+
+
+def test_set_and_clear_a_credential():
+    ws = client.post("/api/workspaces", json={
+        "name": "x", "schema_kind": "openapi",
+        "raw_schema": {"openapi": "3.0.0", "info": {"title": "t", "version": "1"}, "paths": {}},
+    }).json()
+
+    r = client.put(f"/api/workspaces/{ws['id']}/credential", json={"header_name": "api_key", "value": "sk_test_123"})
+    assert r.status_code == 200
+
+    got = client.get(f"/api/workspaces/{ws['id']}").json()
+    assert got["has_credential"] is True
+    assert got["credential_header_name"] == "api_key"
+
+    r2 = client.delete(f"/api/workspaces/{ws['id']}/credential")
+    assert r2.status_code == 200
+
+    got2 = client.get(f"/api/workspaces/{ws['id']}").json()
+    assert got2["has_credential"] is False
+    assert got2["credential_header_name"] is None
+
+
+def test_set_credential_requires_both_fields():
+    ws = client.post("/api/workspaces", json={
+        "name": "x", "schema_kind": "openapi",
+        "raw_schema": {"openapi": "3.0.0", "info": {"title": "t", "version": "1"}, "paths": {}},
+    }).json()
+    r = client.put(f"/api/workspaces/{ws['id']}/credential", json={"header_name": "api_key"})
+    assert r.status_code == 422
+
+
+def test_workspace_without_a_credential_reports_it_honestly():
+    ws = client.post("/api/workspaces", json={
+        "name": "x", "schema_kind": "openapi",
+        "raw_schema": {"openapi": "3.0.0", "info": {"title": "t", "version": "1"}, "paths": {}},
+    }).json()
+    got = client.get(f"/api/workspaces/{ws['id']}").json()
+    assert got["has_credential"] is False
+    assert got["credential_header_name"] is None

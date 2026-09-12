@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user, get_owned_workspace
+from app.crypto import CredentialDecryptionError, decrypt_credential
 from app.db import get_session
 from app.drift.graphql import check_graphql_drift
 from app.drift.rest import check_rest_drift
@@ -47,6 +48,13 @@ def send_request(workspace_id: str, body: dict, session: Session = Depends(get_s
     if req_body is not None and not isinstance(req_body, str):
         raise HTTPException(status_code=422, detail="body must be a string or null")
 
+    if workspace.encrypted_credential and workspace.credential_header_name:
+        if not any(h.lower() == workspace.credential_header_name.lower() for h in headers):
+            try:
+                headers = {**headers, workspace.credential_header_name: decrypt_credential(workspace.encrypted_credential)}
+            except CredentialDecryptionError as exc:
+                raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     try:
         resp, latency_ms = fire_request(method, url, headers, req_body)
     except ProxyError as exc:
@@ -70,9 +78,22 @@ def send_request(workspace_id: str, body: dict, session: Session = Depends(get_s
         if graphql_matched:
             node = session.get(Node, graphql_matched["id"])
 
+    persisted_headers = redact_headers(headers)
+    if workspace.credential_header_name:
+        # redact_headers only knows a fixed set of well-known header
+        # names -- a user-chosen credential header (e.g. the project's
+        # own Petstore fixture uses "api_key", not "Authorization") isn't
+        # in that set, so it must be explicitly redacted here too, or the
+        # real decrypted secret would be written to the database
+        # verbatim (a real gap found and closed during this plan's own
+        # self-review, not left for a task review to catch).
+        for _key in list(persisted_headers):
+            if _key.lower() == workspace.credential_header_name.lower():
+                persisted_headers[_key] = "[REDACTED]"
+
     request_row = Request(
         workspace_id=workspace.id, node_id=node.id if node else None,
-        method=method.upper(), url=url, headers=redact_headers(headers), body=req_body,
+        method=method.upper(), url=url, headers=persisted_headers, body=req_body,
     )
     session.add(request_row)
     session.flush()

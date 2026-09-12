@@ -344,3 +344,53 @@ def test_send_a_graphql_request_that_matches_no_field_is_unverified_no_match(mon
     body = r.json()
     assert body["request"]["node_id"] is None
     assert body["drift_finding"]["status"] == "unverified_no_match"
+
+
+@respx.mock
+def test_a_stored_credential_is_injected_and_redacted(monkeypatch):
+    _fake_getaddrinfo(monkeypatch)
+    ws = client.post("/api/workspaces", json={
+        "name": "Petstore", "schema_kind": "openapi", "raw_schema": FIXTURE,
+    }).json()
+    client.put(f"/api/workspaces/{ws['id']}/credential", json={"header_name": "api_key", "value": "sk_real_secret_value"})
+
+    route = respx.get("https://93.184.216.34/api/v3/pet/1").mock(
+        return_value=httpx.Response(200, json={"id": 1, "name": "Fido", "photoUrls": []})
+    )
+    r = client.post(f"/api/workspaces/{ws['id']}/requests", json={
+        "method": "GET", "url": "https://example.invalid/api/v3/pet/1", "headers": {}, "body": None,
+    })
+    assert r.status_code == 201
+
+    # the real outbound request must have received the REAL decrypted value
+    sent_headers = route.calls.last.request.headers
+    assert sent_headers["api_key"] == "sk_real_secret_value"
+
+    # but the persisted row must never contain the real value
+    from app.db import SessionLocal
+    from app.models import Request as RequestModel
+    session = SessionLocal()
+    try:
+        req_row = session.query(RequestModel).filter(RequestModel.workspace_id == ws["id"]).one()
+        assert req_row.headers.get("api_key") == "[REDACTED]"
+    finally:
+        session.close()
+
+
+@respx.mock
+def test_a_users_own_header_wins_over_the_stored_credential(monkeypatch):
+    _fake_getaddrinfo(monkeypatch)
+    ws = client.post("/api/workspaces", json={
+        "name": "Petstore", "schema_kind": "openapi", "raw_schema": FIXTURE,
+    }).json()
+    client.put(f"/api/workspaces/{ws['id']}/credential", json={"header_name": "api_key", "value": "stored-secret"})
+
+    route = respx.get("https://93.184.216.34/api/v3/pet/1").mock(
+        return_value=httpx.Response(200, json={"id": 1, "name": "Fido", "photoUrls": []})
+    )
+    client.post(f"/api/workspaces/{ws['id']}/requests", json={
+        "method": "GET", "url": "https://example.invalid/api/v3/pet/1",
+        "headers": {"api_key": "user-supplied-value"}, "body": None,
+    })
+    sent_headers = route.calls.last.request.headers
+    assert sent_headers["api_key"] == "user-supplied-value"
