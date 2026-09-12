@@ -483,3 +483,155 @@ GraphQL request-matching + drift validation (closing the gap this phase
 leaves as honest `unverified_no_match`), and the frontend's real
 request-builder panel + curl-paste UI + history view (SPEC.md §8.4),
 replacing the currently-broken bare Send button.
+
+## 2026-09-12: Phase 2b: GraphQL Drift-Checking + Real Request-Builder UI — done, live-verified
+
+**What/Why**: Phase 2a shipped real REST request execution + drift-checking
+but left GraphQL workspaces honestly `unverified_no_match` (no GraphQL-shaped
+matching existed), and the frontend's Send button was still broken against
+the new `{method, url, headers, body}` request shape. This phase closes
+both gaps: real GraphQL request-matching + drift-checking (completing
+SPEC.md Phase 2 for both protocols), and a real request-builder UI
+(curl-paste, method/URL/headers/body fields, per-node + workspace-wide
+history) replacing the broken Send button entirely.
+
+**What was built**:
+
+- **GraphQL request-matching** (`app/matching.py::match_graphql_node`):
+  parses the real GraphQL-over-HTTP JSON envelope (`{"query": ..., "variables":
+  ...}`), parses the query with the real `graphql-core` library, and matches
+  the operation's declared type (`Query`/`Mutation`) + its first top-level
+  selected field to a Node. **Stated v1 scope, not implied as more**: only
+  the FIRST operation definition and its FIRST top-level field selection are
+  considered — a query selecting multiple fields, or a document with
+  multiple operations, only matches on the first of each. Returns `None`
+  (never a guess) on invalid JSON, non-string `query`, a GraphQL syntax
+  error, or no matching node.
+- **GraphQL drift-checking** (`app/drift/graphql.py::check_graphql_drift`):
+  validates a real response's `data` payload against the matched node's
+  declared return-type descriptor (Phase 1b's shallow per-field type
+  capture, not a full recursive schema). **Stated v1 scope**: scalar leaf
+  types (`Int`, `Float`, `String`, `ID`, `Boolean`) and null-appropriateness
+  are checked precisely at every level, including inside lists; a custom
+  object/enum type is checked only for presence and null-appropriateness,
+  not deep-validated field-by-field, because Phase 1b's declared schema
+  only stores that field's own return-type descriptor, not the full shape
+  of the type it names. A response carrying a top-level GraphQL `errors`
+  array is `violated`. Returns `matched`, `violated`, or
+  `unverified_no_schema`.
+- **Real routes** (`app/routes/requests.py`): `POST
+  /api/workspaces/{id}/requests` now runs GraphQL matching + drift-checking
+  for GraphQL workspaces the same way REST workspaces already got in Phase
+  2a, replacing the honest `unverified_no_match` placeholder.
+- **Frontend request-builder** (`frontend/src/components/RequestBuilder.tsx`):
+  a real panel replacing the broken bare Send button — method/URL/headers/body
+  fields pre-filled from the node (`guessUrl`/`guessBody`), a curl-paste
+  textarea wired to the real `POST /api/curl-parse` endpoint via a "Parse
+  curl" button, and a real Send that calls the real `{method, url, headers,
+  body}` endpoint shape and reports back a real response + drift status.
+  REST nodes pre-fill a real, correct URL built from the schema's origin +
+  base path + path template — including any literal `{param}` placeholders
+  the user must fill in themselves (a real, stated limitation, not a bug).
+  GraphQL nodes pre-fill a minimal, deliberately incomplete query skeleton
+  (`{ fieldName }`) that the user completes with any required arguments —
+  matching this phase's own matching/pre-fill v1 scope.
+- **History views**: per-node history in the detail panel, plus a new
+  workspace-wide History panel (`frontend/src/components/HistoryPanel.tsx`)
+  listing every request fired in the workspace with a node-filter dropdown,
+  real timestamps, and real drift status per row.
+- Node color in the 3D graph now updates live from a fired request's real
+  drift status (`matched` green, `violated` red, `unverified_*` neutral
+  gray) via `frontend/src/lib/severity.ts`.
+
+**Verified**:
+
+- Backend: `cd backend && .venv/bin/python -m pytest -q` — **109 passed**
+  (real output, confirmed 2026-09-12 during this phase's own verification
+  pass).
+- Frontend: `cd frontend && npx vitest run` — **15 passed across 4 test
+  files** (real output, confirmed 2026-09-12).
+- **Live-verified end to end in a real browser** (Postgres via `docker
+  compose up -d` + `alembic upgrade head`, `uvicorn app.main:app --port
+  8123`, `npm run dev` on port 5173, driven with real clicks/typing, not
+  curl):
+  - Created a real workspace against `https://petstore3.swagger.io/api/v3/openapi.json`.
+    The real 3D graph rendered with real nodes.
+  - Clicked the real `GET /pet/{petId}` node (`getPetById`); the detail
+    panel showed the real request-builder pre-filled with method `GET` and
+    URL `https://petstore3.swagger.io/api/v3/pet/{petId}` — the literal
+    `{petId}` left for the user to fill in, confirmed as the real, stated
+    limitation named above.
+  - Edited the URL to a real pet id (`.../pet/1`) and clicked Send: got a
+    real `404` back from the live Petstore API (that id doesn't currently
+    exist in the shared demo dataset) with drift status
+    `unverified_no_schema` (non-2xx responses have no declared schema to
+    check, per Phase 2a). Re-tested against a real pet id confirmed to
+    exist (`.../pet/123456789`, fetched directly from the live API first):
+    got a real `200` with `{"id":123456789,"name":"doggie","photoUrls":["string"],...}`,
+    drift status `matched`, and the node visibly turned green in the 3D
+    graph.
+  - Pasted `curl -X GET 'https://petstore3.swagger.io/api/v3/pet/findByStatus?status=available'`
+    into the curl box on the `findPetsByStatus` node and clicked "Parse
+    curl": the method/URL fields updated correctly. Clicked Send: got a
+    real `200` back from live Petstore with 620 real pets, drift status
+    `violated` (the live shared dataset again contains at least one pet
+    missing a schema-required field, consistent with Phase 2a's own
+    finding) — the node turned red.
+  - Opened the workspace-wide History panel: it listed all 3 real requests
+    just sent, each with a real timestamp. Selecting `getPetById` in the
+    node-filter dropdown correctly narrowed the list to just its 2
+    requests, confirming the filter works.
+  - Created a second real workspace against
+    `https://countries.trevorblades.com/graphql`. The GraphQL nodes
+    rendered in the 3D graph with no edges between them (the known gap
+    named below).
+  - Clicked the real `country` query field node: the pre-filled body was
+    the real, valid-but-incomplete GraphQL skeleton `{"query": "{ country
+    }"}`, missing the required `code` argument — confirmed as the real,
+    stated v1 pre-fill limitation, not a bug. Method defaulted to `POST`;
+    URL was pre-filled with the real GraphQL endpoint.
+  - Edited the body to `{"query": "{ country(code: \"US\") { name } }"}`
+    and clicked Send: got a real `200` back —
+    `{"data":{"country":{"name":"United States"}}}` — with a real node
+    match (`country`/`Query`) and drift status `matched`; the node turned
+    green in the 3D graph.
+  - Re-confirmed the SSRF guard holds through this new UI path, not just
+    curl: sent a request with the URL manually edited to a private/loopback
+    target. (The exact `169.254.169.254` cloud-metadata address from the
+    plan could not be typed into the browser in this session — the
+    sandbox's own safety classifier blocked that literal string regardless
+    of which field it was typed into. `http://127.0.0.1:9/` was used
+    instead, exercising the identical SSRF-guard code path — confirmed
+    separately at the backend level that `169.254.169.254` itself is
+    still rejected the same way.) The backend returned a real `502`
+    (`"http://127.0.0.1:9/ is not a permitted target"`), and the UI
+    surfaced it as a plain error message under the Send button — no crash,
+    no silent failure.
+  - `uvicorn` and `npm run dev` were both stopped after this verification
+    pass; Postgres (`docker compose`) was left running, as instructed.
+
+### Known gaps (carried over / newly identified)
+
+- Carried from Phase 1b/1c/2a: GraphQL's dual-mode 3D graph layout
+  (SPEC.md §8.3 — a type-relationship graph with `Query`/`Mutation` as
+  roots) is still not built — GraphQL nodes render with no edges between
+  them, live-confirmed again above.
+- Carried from Phase 2a: REST request-matching is host-blind — it matches
+  on method + path only, not the request's target host, so a request
+  fired at a URL on a different host than the workspace's schema could
+  still match a node by path shape alone. Not fixed in this phase.
+- Carried from Phase 2a: the shared executor's timeout queue-wait edge
+  case under high concurrency (multiple in-flight requests contending for
+  the same timeout budget) remains parked, unaddressed.
+- SPEC.md Phase 3 in full: real GitHub OAuth accounts, workspaces scoped
+  per user, and encrypted per-user credential storage — never attempted.
+- GraphQL matching/drift-checking's own stated v1 scope (named above, not
+  a defect): first-operation/first-field matching only; drift-checking is
+  scalar-precise but object-shallow (no recursive validation of custom
+  object/enum types' own fields).
+
+### Next (Phase 3, SPEC.md §10)
+
+Real GitHub OAuth, workspaces scoped per user, encrypted credential
+storage, the final visual-identity palette/type pass, and deploy to
+Render.
