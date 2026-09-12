@@ -13,6 +13,7 @@ dependencies = [
     "PyYAML>=6.0",
     "openapi-spec-validator>=0.7",
     "graphql-core>=3.2",
+    "itsdangerous>=2.0",
 ]
 
 [project.optional-dependencies]
