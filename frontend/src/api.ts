@@ -62,6 +62,24 @@ export interface RequestHistoryEntry {
   sent_at: string
 }
 
+export interface CurrentUser {
+  id: string
+  username: string
+}
+
+export const GITHUB_LOGIN_URL = '/api/auth/github/login'
+
+export function getCurrentUser(): Promise<CurrentUser | null> {
+  return fetch('/api/auth/me', { credentials: 'include' }).then((res) => {
+    if (res.status === 401) return null
+    return json<CurrentUser>(res)
+  })
+}
+
+export function logout(): Promise<void> {
+  return fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).then(() => undefined)
+}
+
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const detail = await res.text().catch(() => res.statusText)
@@ -83,15 +101,16 @@ export function createWorkspace(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    credentials: 'include',
   }).then((res) => json<{ id: string; name: string; schema_kind: string; node_count: number }>(res))
 }
 
 export function listWorkspaces(): Promise<WorkspaceSummary[]> {
-  return fetch('/api/workspaces').then((res) => json<WorkspaceSummary[]>(res))
+  return fetch('/api/workspaces', { credentials: 'include' }).then((res) => json<WorkspaceSummary[]>(res))
 }
 
 export function getWorkspace(id: string): Promise<Workspace> {
-  return fetch(`/api/workspaces/${encodeURIComponent(id)}`).then((res) => json<Workspace>(res))
+  return fetch(`/api/workspaces/${encodeURIComponent(id)}`, { credentials: 'include' }).then((res) => json<Workspace>(res))
 }
 
 export function sendRequest(
@@ -105,6 +124,7 @@ export function sendRequest(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ method, url, headers, body }),
+    credentials: 'include',
   }).then((res) => json<SendResult>(res))
 }
 
@@ -113,15 +133,16 @@ export function curlParse(curl: string): Promise<CurlParseResult> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ curl }),
+    credentials: 'include',
   }).then((res) => json<CurlParseResult>(res))
 }
 
 export function getNodeHistory(workspaceId: string, nodeId: string): Promise<NodeHistoryEntry[]> {
-  return fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/nodes/${encodeURIComponent(nodeId)}/history`)
+  return fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/nodes/${encodeURIComponent(nodeId)}/history`, { credentials: 'include' })
     .then((res) => json<NodeHistoryEntry[]>(res))
 }
 
 export function getWorkspaceRequests(workspaceId: string): Promise<RequestHistoryEntry[]> {
-  return fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/requests`)
+  return fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/requests`, { credentials: 'include' })
     .then((res) => json<RequestHistoryEntry[]>(res))
 }

@@ -1,5 +1,5 @@
-import { useCallback, useState } from 'react'
-import { createWorkspace, getWorkspace, type SendResult, type Workspace } from './api'
+import { useCallback, useEffect, useState } from 'react'
+import { createWorkspace, getCurrentUser, getWorkspace, logout, type CurrentUser, type SendResult, type Workspace, GITHUB_LOGIN_URL } from './api'
 import { DetailPanel } from './components/DetailPanel'
 import { HistoryPanel } from './components/HistoryPanel'
 import { WorkspaceForm } from './components/WorkspaceForm'
@@ -15,6 +15,11 @@ export function App() {
   const [error, setError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [showHistory, setShowHistory] = useState(false)
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null | undefined>(undefined)
+
+  useEffect(() => {
+    getCurrentUser().then(setCurrentUser).catch(() => setCurrentUser(null))
+  }, [])
 
   const handleClose = useCallback(() => setSelectedId(null), [])
   const handleCloseHistory = useCallback(() => setShowHistory(false), [])
@@ -42,13 +47,32 @@ export function App() {
     setStatuses((prev) => ({ ...prev, [nodeId]: result.drift_finding.status }))
   }
 
+  function handleLogout() {
+    logout().then(() => setCurrentUser(null))
+  }
+
   const selected = workspace?.nodes.find((n) => n.id === selectedId) ?? null
+
+  if (currentUser === undefined) {
+    return <div className="app auth-loading">Loading…</div>
+  }
+
+  if (currentUser === null) {
+    return (
+      <div className="app auth-gate">
+        <div className="brand">parity<span>.</span></div>
+        <a className="auth-gate__button" href={GITHUB_LOGIN_URL}>Sign in with GitHub</a>
+      </div>
+    )
+  }
 
   return (
     <div className="app">
       <div className="scene-root">
         <div className="hud-top">
           <div className="brand">parity<span>.</span></div>
+          <span className="auth-user">{currentUser.username}</span>
+          <button type="button" className="auth-logout" onClick={handleLogout}>Log out</button>
           <WorkspaceList onLoad={handleLoad} refreshKey={refreshKey} currentId={workspace?.id ?? null} busy={busy} />
           {workspace && (
             <button type="button" className="history-toggle" onClick={() => setShowHistory(true)}>
