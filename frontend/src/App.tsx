@@ -60,6 +60,7 @@ export function App() {
       setSelectedId(null)
       setError(null)
       setShowHistory(false)
+      setShowCredential(false)
     })
   }
 
