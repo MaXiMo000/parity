@@ -8,9 +8,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.db import DEFAULT_USER_ID, get_session
+from app.auth.dependencies import get_current_user, get_owned_workspace
+from app.db import get_session
 from app.edges import compute_rest_edges
-from app.models import Node, Workspace
+from app.models import Node, User, Workspace
 from app.schema.graphql import GraphQLFetchError, GraphQLValidationError, fetch_introspection, parse_graphql
 from app.schema.openapi import OpenAPIFetchError, OpenAPIValidationError, extract_base_path, fetch_spec, parse_openapi
 
@@ -18,7 +19,7 @@ router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
 
 
 @router.post("", status_code=201)
-def create_workspace(body: dict, session: Session = Depends(get_session)) -> dict:
+def create_workspace(body: dict, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)) -> dict:
     name = body.get("name")
     schema_kind = body.get("schema_kind")
     url = body.get("schema_source_url")
@@ -60,7 +61,7 @@ def create_workspace(body: dict, session: Session = Depends(get_session)) -> dic
             raise HTTPException(status_code=422, detail=f"invalid GraphQL schema: {exc}") from exc
 
     workspace = Workspace(
-        user_id=DEFAULT_USER_ID, name=name, schema_kind=schema_kind,
+        user_id=current_user.id, name=name, schema_kind=schema_kind,
         schema_source=url or "pasted", raw_schema=spec, base_path=base_path,
     )
     session.add(workspace)
@@ -75,16 +76,14 @@ def create_workspace(body: dict, session: Session = Depends(get_session)) -> dic
 
 
 @router.get("")
-def list_workspaces(session: Session = Depends(get_session)) -> list[dict]:
-    rows = session.query(Workspace).filter(Workspace.user_id == DEFAULT_USER_ID).all()
+def list_workspaces(session: Session = Depends(get_session), current_user: User = Depends(get_current_user)) -> list[dict]:
+    rows = session.query(Workspace).filter(Workspace.user_id == current_user.id).all()
     return [{"id": w.id, "name": w.name, "schema_kind": w.schema_kind} for w in rows]
 
 
 @router.get("/{workspace_id}")
-def get_workspace(workspace_id: str, session: Session = Depends(get_session)) -> dict:
-    workspace = session.get(Workspace, workspace_id)
-    if workspace is None:
-        raise HTTPException(status_code=404, detail="unknown workspace id")
+def get_workspace(workspace_id: str, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)) -> dict:
+    workspace = get_owned_workspace(workspace_id, current_user, session)
 
     node_dicts = [
         {

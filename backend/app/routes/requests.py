@@ -12,11 +12,12 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.auth.dependencies import get_current_user, get_owned_workspace
 from app.db import get_session
 from app.drift.graphql import check_graphql_drift
 from app.drift.rest import check_rest_drift
 from app.matching import match_graphql_node, match_rest_node
-from app.models import DriftFinding, Node, Request, Response, Workspace
+from app.models import DriftFinding, Node, Request, Response, User, Workspace
 from app.proxy.client import ProxyError, fire_request
 from app.redact import redact_headers
 
@@ -33,10 +34,8 @@ def _safe_json(text: str | None) -> Any:
 
 
 @router.post("/{workspace_id}/requests", status_code=201)
-def send_request(workspace_id: str, body: dict, session: Session = Depends(get_session)) -> dict:
-    workspace = session.get(Workspace, workspace_id)
-    if workspace is None:
-        raise HTTPException(status_code=404, detail="unknown workspace id")
+def send_request(workspace_id: str, body: dict, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)) -> dict:
+    workspace = get_owned_workspace(workspace_id, current_user, session)
 
     method = body.get("method")
     url = body.get("url")
@@ -109,10 +108,8 @@ def send_request(workspace_id: str, body: dict, session: Session = Depends(get_s
 
 
 @router.get("/{workspace_id}/requests")
-def list_requests(workspace_id: str, session: Session = Depends(get_session)) -> list[dict]:
-    workspace = session.get(Workspace, workspace_id)
-    if workspace is None:
-        raise HTTPException(status_code=404, detail="unknown workspace id")
+def list_requests(workspace_id: str, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)) -> list[dict]:
+    workspace = get_owned_workspace(workspace_id, current_user, session)
     rows = (
         session.query(Request)
         .filter(Request.workspace_id == workspace_id)
@@ -126,7 +123,8 @@ def list_requests(workspace_id: str, session: Session = Depends(get_session)) ->
 
 
 @router.get("/{workspace_id}/nodes/{node_id}/history")
-def node_history(workspace_id: str, node_id: str, session: Session = Depends(get_session)) -> list[dict]:
+def node_history(workspace_id: str, node_id: str, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)) -> list[dict]:
+    get_owned_workspace(workspace_id, current_user, session)  # 404s before even checking the node exists, if the workspace isn't the caller's
     node = session.get(Node, node_id)
     if node is None or node.workspace_id != workspace_id:
         raise HTTPException(status_code=404, detail="unknown node id")

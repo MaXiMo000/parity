@@ -3,16 +3,31 @@ import socket
 from pathlib import Path
 
 import httpx
+import pytest
 import respx
 from fastapi.testclient import TestClient
 
 from app.db import SessionLocal
 from app.main import app
-from app.models import Node, Request
+from app.models import Node, Request, User
 from app.models import Response as ResponseModel
+from tests.conftest import login_as
 
 client = TestClient(app)
 FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "petstore-openapi.json").read_text())
+
+
+@pytest.fixture(autouse=True)
+def _authenticated():
+    session = SessionLocal()
+    try:
+        user = User(github_id="test-github-id", username="testuser")
+        session.add(user)
+        session.commit()
+        user_id = user.id
+    finally:
+        session.close()
+    login_as(client, user_id)
 
 
 def _fake_getaddrinfo(monkeypatch):
