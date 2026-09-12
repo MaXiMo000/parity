@@ -394,3 +394,27 @@ def test_a_users_own_header_wins_over_the_stored_credential(monkeypatch):
     })
     sent_headers = route.calls.last.request.headers
     assert sent_headers["api_key"] == "user-supplied-value"
+
+
+@respx.mock
+def test_an_injected_credential_is_stripped_on_a_cross_host_redirect(monkeypatch):
+    _fake_getaddrinfo(monkeypatch)
+    ws = client.post("/api/workspaces", json={
+        "name": "Petstore", "schema_kind": "openapi", "raw_schema": FIXTURE,
+    }).json()
+    client.put(f"/api/workspaces/{ws['id']}/credential", json={"header_name": "api_key", "value": "sk_real_secret_value"})
+
+    respx.get("https://93.184.216.34/api/v3/pet/1").mock(
+        return_value=httpx.Response(302, headers={"location": "https://other.invalid/api/v3/pet/2"})
+    )
+    route = respx.get("https://93.184.216.34/api/v3/pet/2").mock(
+        return_value=httpx.Response(200, json={"id": 2, "name": "Rex", "photoUrls": []})
+    )
+    r = client.post(f"/api/workspaces/{ws['id']}/requests", json={
+        "method": "GET", "url": "https://example.invalid/api/v3/pet/1", "headers": {}, "body": None,
+    })
+    assert r.status_code == 201
+
+    # the credential must not have survived the cross-host redirect
+    sent_headers = route.calls.last.request.headers
+    assert "api_key" not in sent_headers

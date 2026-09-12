@@ -87,6 +87,24 @@ def test_send_pinned_strips_x_api_key_on_a_cross_host_redirect(monkeypatch):
 
 
 @respx.mock
+def test_send_pinned_strips_a_caller_specified_header_on_a_cross_host_redirect(monkeypatch):
+    monkeypatch.setattr(
+        socket, "getaddrinfo",
+        lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],
+    )
+    respx.get("https://93.184.216.34/old").mock(
+        return_value=httpx.Response(302, headers={"location": "https://other.invalid/new"})
+    )
+    respx.get("https://93.184.216.34/new").mock(return_value=httpx.Response(200))
+    send_pinned(
+        "GET", "https://example.invalid/old", _FetchError,
+        headers={"api_key": "supersecret"}, extra_sensitive_headers=frozenset({"api_key"}),
+    )
+    sent_headers = respx.calls.last.request.headers
+    assert "api_key" not in sent_headers
+
+
+@respx.mock
 def test_send_pinned_strips_the_body_on_a_cross_host_redirect(monkeypatch):
     monkeypatch.setattr(
         socket, "getaddrinfo",

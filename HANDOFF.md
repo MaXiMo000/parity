@@ -818,8 +818,9 @@ readable back out in plaintext.
   `has_credential` (bool) and `credential_header_name` (string) —
   never the decrypted value.
 - **Real injection + real redaction gap found and closed during this
-  plan's own self-review** (`backend/app/routes/requests.py`,
-  `backend/app/redact.py`): `POST /api/workspaces/{id}/requests`
+  plan's own self-review** (`backend/app/routes/requests.py`;
+  `app/redact.py`'s fixed-name limitation is exactly what necessitated
+  this explicit step): `POST /api/workspaces/{id}/requests`
   decrypts the stored credential and injects it under its configured
   header name before firing, unless the caller already supplied that
   header themselves. The persisted copy must be redacted the same as

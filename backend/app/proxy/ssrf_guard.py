@@ -97,7 +97,15 @@ def _send_with_wall_clock(req: httpx.Request, timeout: float) -> httpx.Response:
     return future.result(timeout=timeout)
 
 
-def send_pinned(method: str, url: str, error_cls: type[Exception], *, timeout: float = 15.0, **kwargs: Any) -> httpx.Response:
+def send_pinned(
+    method: str,
+    url: str,
+    error_cls: type[Exception],
+    *,
+    timeout: float = 15.0,
+    extra_sensitive_headers: frozenset[str] = frozenset(),
+    **kwargs: Any,
+) -> httpx.Response:
     """Builds a pinned request (_build_pinned_request) and sends it,
     manually following at most one redirect hop -- the hop itself
     re-built and re-validated the same way, so an initially-safe URL that
@@ -111,7 +119,10 @@ def send_pinned(method: str, url: str, error_cls: type[Exception], *, timeout: f
     review named and explicitly deferred (this function had no
     credential-carrying caller then; app/proxy/client.py, added in this
     plan, is the first one). A same-host redirect keeps every header
-    unchanged, since a same-origin redirect has no reason to drop them."""
+    unchanged, since a same-origin redirect has no reason to drop them.
+    Callers may pass extra_sensitive_headers to strip additional,
+    per-call header names (e.g. a workspace's custom credential header)
+    beyond the fixed SENSITIVE_HEADERS set."""
     try:
         req = _build_pinned_request(method, url, **kwargs)
         if req is None:
@@ -138,7 +149,7 @@ def send_pinned(method: str, url: str, error_cls: type[Exception], *, timeout: f
             if redirect_host and redirect_host != original_host:
                 headers = dict(redirect_kwargs.get("headers") or {})
                 for key in list(headers):
-                    if key.lower() in SENSITIVE_HEADERS:
+                    if key.lower() in SENSITIVE_HEADERS | extra_sensitive_headers:
                         del headers[key]
                 redirect_kwargs["headers"] = headers
                 redirect_kwargs.pop("content", None)

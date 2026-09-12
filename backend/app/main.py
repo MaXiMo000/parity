@@ -30,6 +30,17 @@ for _required_var in ("GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "GITHUB_CALLBA
     if os.environ.get(_required_var) is None:
         raise RuntimeError(f"{_required_var} is required (see AUTH_SETUP.md) -- refusing to boot without it")
 
+# A FERNET_KEY that's merely set but not a valid 32-byte urlsafe-base64
+# key would otherwise boot cleanly and only fail on the first real
+# encrypt/decrypt call (a confusing 500) -- construct it here too so a
+# malformed key is also a boot-time failure.
+if os.environ.get("FERNET_KEY") is not None:
+    from cryptography.fernet import Fernet
+    try:
+        Fernet(os.environ["FERNET_KEY"].encode("utf-8"))
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError(f"FERNET_KEY is not a valid Fernet key (see AUTH_SETUP.md): {exc}") from exc
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

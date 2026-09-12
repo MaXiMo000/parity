@@ -16,7 +16,13 @@ class ProxyError(Exception):
     pass
 
 
-def fire_request(method: str, url: str, headers: dict[str, str] | None, body: str | None) -> tuple[httpx.Response, int]:
+def fire_request(
+    method: str,
+    url: str,
+    headers: dict[str, str] | None,
+    body: str | None,
+    extra_sensitive_headers: frozenset[str] = frozenset(),
+) -> tuple[httpx.Response, int]:
     """Returns (response, latency_ms). Raises ProxyError on an
     unsafe/unresolvable target or a network failure (via send_pinned's
     own error handling)."""
@@ -26,6 +32,6 @@ def fire_request(method: str, url: str, headers: dict[str, str] | None, body: st
     if body is not None:
         kwargs["content"] = body.encode("utf-8")
     start = time.monotonic()
-    resp = send_pinned(method, url, ProxyError, **kwargs)
+    resp = send_pinned(method, url, ProxyError, extra_sensitive_headers=extra_sensitive_headers, **kwargs)
     latency_ms = int((time.monotonic() - start) * 1000)
     return resp, latency_ms

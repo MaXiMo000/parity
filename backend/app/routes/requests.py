@@ -48,15 +48,17 @@ def send_request(workspace_id: str, body: dict, session: Session = Depends(get_s
     if req_body is not None and not isinstance(req_body, str):
         raise HTTPException(status_code=422, detail="body must be a string or null")
 
+    extra_sensitive_headers: frozenset[str] = frozenset()
     if workspace.encrypted_credential and workspace.credential_header_name:
         if not any(h.lower() == workspace.credential_header_name.lower() for h in headers):
             try:
                 headers = {**headers, workspace.credential_header_name: decrypt_credential(workspace.encrypted_credential)}
+                extra_sensitive_headers = frozenset({workspace.credential_header_name.lower()})
             except CredentialDecryptionError as exc:
                 raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     try:
-        resp, latency_ms = fire_request(method, url, headers, req_body)
+        resp, latency_ms = fire_request(method, url, headers, req_body, extra_sensitive_headers=extra_sensitive_headers)
     except ProxyError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
