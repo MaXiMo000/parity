@@ -653,3 +653,112 @@ history) replacing the broken Send button entirely.
 Real GitHub OAuth, workspaces scoped per user, encrypted credential
 storage, the final visual-identity palette/type pass, and deploy to
 Render.
+
+## 2026-09-12: Phase 3a: Real GitHub OAuth + Per-User Workspaces — done, partially live-verified (one manual step remains)
+
+**What/Why**: Phase 2b left every workspace owned by a single hardcoded
+default system user (Phase 1's SPEC.md-sanctioned placeholder) with no
+real accounts and no ownership enforcement. This phase replaces that with
+a real GitHub OAuth login flow, a real signed-cookie session, and real
+per-user ownership checks on every workspace-scoped route — plus a
+frontend gate that only shows the app to a logged-in user.
+
+**What was built**:
+
+- **Real GitHub OAuth flow** (`backend/app/auth/github.py`,
+  `backend/app/routes/auth.py`): the standard authorization-code flow —
+  `GET /api/auth/github/login` generates a CSRF `state`, stores it in the
+  session, and redirects to GitHub's real `authorize` endpoint;
+  `GET /api/auth/github/callback` validates `state`, exchanges the code
+  for a token, fetches the real GitHub profile, and upserts a `User` row
+  keyed on `github_id`. `GET /api/auth/me` returns the current user (401
+  if none); `POST /api/auth/logout` clears the session.
+- **Session mechanism**: Starlette's `SessionMiddleware` (registered in
+  `app/main.py`), a **signed cookie**, not a server-side session store —
+  the cookie itself carries `user_id`, cryptographically signed with
+  `SESSION_SECRET_KEY` (`itsdangerous` under the hood). There is no
+  session table in Postgres; nothing to garbage-collect, but also nothing
+  server-side to revoke short of rotating the secret.
+- **Real per-user ownership enforcement, not just recorded ownership**:
+  every workspace-scoped route (`app/routes/workspaces.py`,
+  `app/routes/requests.py`) now depends on `get_current_user` (401 if not
+  logged in) and resolves the workspace via `get_owned_workspace`, which
+  404s if the workspace doesn't exist *or* belongs to a different user.
+  This was verified adversarially, not just by unit test: Task 2's Step 5
+  logged in two real separate users (alice, bob) against two separate
+  `TestClient`s, had alice create a workspace, then confirmed
+  `alice GET /api/workspaces/{id}` → **200** and
+  `bob GET /api/workspaces/{id}` → **404** — the ownership boundary is
+  real, not a column nobody checks.
+- **Frontend login gate** (`frontend/src/App.tsx`): on load, calls
+  `GET /api/auth/me`; while that's pending shows a loading state; on 401
+  shows a "Sign in with GitHub" gate instead of the workspace UI; only a
+  real logged-in user sees the graph/workspace UI at all. Logout clears
+  all client-side workspace/selection/history state, not just the user.
+
+### Verified (real, automated — run in this session)
+
+- Backend: `cd backend && .venv/bin/python -m pytest -q` — **120 passed**
+  (matches Task 2's own run exactly; unchanged by this task, which added
+  no new backend code).
+- Frontend: `cd frontend && npx vitest run` — **15 passed across 4 test
+  files** (matches Task 3's own run exactly; unchanged by this task).
+
+### Verified live, in this session — and the exact boundary of what that covers
+
+Started the real stack (Postgres via `docker compose up -d` +
+`alembic upgrade head`, `uvicorn` on `:8123`, `npm run dev` on `:5173`)
+**without a registered GitHub OAuth app** — using only the dev-default
+env vars (`GITHUB_CLIENT_ID=dev`, `GITHUB_CLIENT_SECRET=dev`,
+`GITHUB_CALLBACK_URL=http://localhost:8123/api/auth/github/callback`),
+since a real client id/secret don't exist yet. In a real browser pane:
+
+- Loading `http://localhost:5173` showed the "Sign in with GitHub" gate,
+  **not** the workspace UI — confirms the frontend correctly treats "no
+  session" as logged-out.
+- Clicked "Sign in with GitHub". The browser navigated to
+  `https://github.com/login?client_id=dev&return_to=%2Flogin%2Foauth%2Fauthorize%3Fclient_id%3Ddev%26redirect_uri%3D...%26scope%3Dread%253Auser%26state%3D...`
+  — GitHub's own login page (since the browser had no GitHub session),
+  whose `return_to` decodes to the real
+  `/login/oauth/authorize?client_id=dev&redirect_uri=http://localhost:8123/api/auth/github/callback&scope=read:user&state=...`
+  URL. This confirms the redirect really fires toward a real, correctly-shaped
+  GitHub OAuth endpoint with the right `client_id`, `redirect_uri`, and a
+  fresh CSRF `state`. **Stopped there, as instructed — no login was
+  attempted with fake credentials, because there is no real GitHub OAuth
+  app behind `client_id=dev` to complete a login against.**
+- `curl http://localhost:8123/api/workspaces` with no cookie returned a
+  real `401` (`{"detail":"not authenticated"}`) — not the old
+  fixed-default-user workspace list — confirming Task 2's enforcement
+  holds against the running server, not just in tests.
+- Stopped the background `uvicorn` and `npm run dev` processes afterward;
+  Postgres (`docker compose`) was left running.
+
+**What this explicitly does NOT cover — the one manual step this plan
+cannot perform**: nobody has registered a real GitHub OAuth App yet
+(`GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` above are the fake dev-default
+values, not real ones), so no real GitHub consent screen was ever shown
+and no real login/callback/session-issuance round trip has been
+completed end to end. A human with a real GitHub account must register
+the app and click through a real consent screen once to fully verify the
+flow — see `AUTH_SETUP.md` for the exact steps. **This has not yet been
+done.** Do not read the verification above as full end-to-end proof of
+the OAuth flow; it proves every part of the flow that doesn't require a
+real, registered GitHub app.
+
+### Expected, not a bug: old dev-DB workspaces are now unreachable
+
+Every workspace created during Phases 0–2 in a local dev database was
+owned by the old hardcoded default system user (a fixed id used before
+any real accounts existed). That data is still in Postgres, untouched —
+by deliberate ruling, since no real user data ever existed to migrate.
+Once someone logs in for real, `get_owned_workspace` will 404 on all of
+it, because it's scoped to a user id no real GitHub account will ever
+have. Anyone testing locally with old workspace data simply won't see it
+after logging in for real. This is expected, not a regression.
+
+### Next (Phase 3b, SPEC.md §10)
+
+Encrypted per-workspace credential storage (so users can attach real
+auth headers/tokens to a workspace without them landing in plaintext),
+then Phase 3c: the final visual-identity palette/type pass and
+deploy-readiness for Render.
