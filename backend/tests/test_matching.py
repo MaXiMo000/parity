@@ -84,3 +84,9 @@ def test_no_match_when_body_has_no_query_field():
 def test_no_match_when_body_is_empty():
     assert match_graphql_node(GRAPHQL_NODES, None) is None
     assert match_graphql_node(GRAPHQL_NODES, "") is None
+
+
+def test_a_fragment_spread_as_the_first_selection_does_not_false_match():
+    import json
+    body = json.dumps({"query": "{ ...petFrag } fragment petFrag on Query { pet { name } }"})
+    assert match_graphql_node(GRAPHQL_NODES, body) is None

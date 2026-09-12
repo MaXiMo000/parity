@@ -537,8 +537,8 @@ history) replacing the broken Send button entirely.
   matching this phase's own matching/pre-fill v1 scope.
 - **History views**: per-node history in the detail panel, plus a new
   workspace-wide History panel (`frontend/src/components/HistoryPanel.tsx`)
-  listing every request fired in the workspace with a node-filter dropdown,
-  real timestamps, and real drift status per row.
+  listing every request fired in the workspace — method, URL, and
+  timestamp per row — filterable by a node-filter dropdown.
 - Node color in the 3D graph now updates live from a fired request's real
   drift status (`matched` green, `violated` red, `unverified_*` neutral
   gray) via `frontend/src/lib/severity.ts`.
@@ -616,10 +616,19 @@ history) replacing the broken Send button entirely.
   (SPEC.md §8.3 — a type-relationship graph with `Query`/`Mutation` as
   roots) is still not built — GraphQL nodes render with no edges between
   them, live-confirmed again above.
-- Carried from Phase 2a: REST request-matching is host-blind — it matches
-  on method + path only, not the request's target host, so a request
-  fired at a URL on a different host than the workspace's schema could
-  still match a node by path shape alone. Not fixed in this phase.
+- **Host-blind request-matching, both protocols, worsened by this phase's
+  own GraphQL work — now the single most significant open item carried
+  into Phase 3**: carried from Phase 2a, REST request-matching matches on
+  method + path only, not the request's target host, so a request fired
+  at a URL on a different host than the workspace's schema could still
+  match a node by path shape alone. This phase's GraphQL matching
+  (`match_graphql_node`) is even more host-blind than that: it looks only
+  at the request body's content (operation type + field name), with no
+  host or path check of any kind, whereas REST at least requires
+  method + path-template shape to align. Neither should be patched
+  separately — both should eventually be closed by one shared "does this
+  request's real destination match the workspace's own declared API"
+  check.
 - Carried from Phase 2a: the shared executor's timeout queue-wait edge
   case under high concurrency (multiple in-flight requests contending for
   the same timeout budget) remains parked, unaddressed.
@@ -629,6 +638,15 @@ history) replacing the broken Send button entirely.
   a defect): first-operation/first-field matching only; drift-checking is
   scalar-precise but object-shallow (no recursive validation of custom
   object/enum types' own fields).
+- **`Node.call_count` (SPEC.md §7.5, "denormalized, for node sizing") is
+  tracked correctly on the backend but never used anywhere in the
+  frontend**: `scene/Node.tsx` renders every node at the same fixed size
+  regardless of real call frequency, so SPEC.md §8.3's "Size = real call
+  frequency... a real signal, not decoration" is unimplemented. This gap
+  existed in every earlier phase too, but went unnamed because
+  `call_count` was always zero in normal use before real request-sending
+  existed — Phase 2b is the first phase where this counter is actually
+  non-zero, making this the right moment to name it.
 
 ### Next (Phase 3, SPEC.md §10)
 

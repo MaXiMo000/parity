@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { curlParse, sendRequest, type Node, type SendResult, type Workspace } from '../api'
 
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
@@ -46,15 +46,6 @@ export function RequestBuilder({ workspace, node, onSent }: {
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    setMethod(node.method ?? (node.kind === 'graphql_field' ? 'POST' : 'GET'))
-    setUrl(guessUrl(workspace, node))
-    setHeadersText('')
-    setBody(guessBody(node))
-    setCurlText('')
-    setError(null)
-  }, [node.id, workspace.id])
-
   function parseHeadersText(): Record<string, string> {
     const headers: Record<string, string> = {}
     for (const line of headersText.split('\n')) {
@@ -90,6 +81,8 @@ export function RequestBuilder({ workspace, node, onSent }: {
     }
   }
 
+  const methodOptions = METHODS.includes(method) ? METHODS : [method, ...METHODS]
+
   return (
     <div className="request-builder">
       <textarea
@@ -104,7 +97,7 @@ export function RequestBuilder({ workspace, node, onSent }: {
 
       <div className="request-builder__line">
         <select value={method} onChange={(e) => setMethod(e.target.value)} aria-label="HTTP method">
-          {METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+          {methodOptions.map((m) => <option key={m} value={m}>{m}</option>)}
         </select>
         <input
           type="text" placeholder="https://api.example.com/…" value={url}

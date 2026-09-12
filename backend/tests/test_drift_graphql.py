@@ -45,8 +45,20 @@ def test_wrong_scalar_type_is_violated():
     assert "Int" in detail
 
 
-def test_graphql_errors_in_the_response_are_violated():
-    body = json.dumps({"errors": [{"message": "field not found"}], "data": None})
+def test_errors_with_no_data_key_is_unverified_not_violated():
+    body = json.dumps({"errors": [{"message": "must have a selection of subfields"}]})
+    status, detail = check_graphql_drift(NAMED_NULLABLE_SCHEMA, body)
+    assert status == "unverified_no_schema"
+
+
+def test_errors_with_null_data_is_unverified_not_violated():
+    body = json.dumps({"errors": [{"message": "boom"}], "data": None})
+    status, detail = check_graphql_drift(NAMED_NULLABLE_SCHEMA, body)
+    assert status == "unverified_no_schema"
+
+
+def test_graphql_errors_alongside_real_data_are_violated():
+    body = json.dumps({"errors": [{"message": "field not found"}], "data": {"count": 42}})
     status, detail = check_graphql_drift(INT_SCHEMA, body)
     assert status == "violated"
     assert "GraphQL errors" in detail
@@ -62,5 +74,21 @@ def test_custom_object_type_is_matched_without_deep_validation():
     # Country is a custom object type -- v1 only checks presence/nullability,
     # not Country's own fields (see this task's own stated scope boundary).
     body = json.dumps({"data": {"country": {"anything": "goes", "here": 123}}})
+    status, detail = check_graphql_drift(NAMED_NULLABLE_SCHEMA, body)
+    assert status == "matched"
+
+
+def test_bare_scalar_in_a_custom_object_slot_is_violated():
+    body = json.dumps({"data": {"country": 12345}})
+    status, detail = check_graphql_drift(NAMED_NULLABLE_SCHEMA, body)
+    assert status == "violated"
+    assert "Country" in detail
+
+
+def test_a_string_enum_value_in_a_named_slot_is_matched():
+    # Enum values always serialize as strings; the type descriptor can't
+    # distinguish "object" from "enum" by name alone, so a string is
+    # accepted for any non-scalar NAMED type (a real, stated v1 limit).
+    body = json.dumps({"data": {"country": "AVAILABLE"}})
     status, detail = check_graphql_drift(NAMED_NULLABLE_SCHEMA, body)
     assert status == "matched"

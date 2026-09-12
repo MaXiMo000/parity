@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from urllib.parse import urlparse
 
-from graphql import GraphQLSyntaxError, OperationDefinitionNode, parse
+from graphql import FieldNode, GraphQLSyntaxError, OperationDefinitionNode, parse
 
 
 def match_rest_node(nodes: list[dict], method: str, url: str, base_path: str) -> dict | None:
@@ -86,6 +86,8 @@ def match_graphql_node(nodes: list[dict], request_body_text: str | None) -> dict
         if not definition.selection_set.selections:
             return None
         first_selection = definition.selection_set.selections[0]
+        if not isinstance(first_selection, FieldNode):
+            return None
         field_name_node = getattr(first_selection, "name", None)
         if field_name_node is None:
             return None
