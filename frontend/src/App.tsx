@@ -17,6 +17,7 @@ export function App() {
   const [showHistory, setShowHistory] = useState(false)
 
   const handleClose = useCallback(() => setSelectedId(null), [])
+  const handleCloseHistory = useCallback(() => setShowHistory(false), [])
 
   function handleCreate(name: string, kind: 'openapi' | 'graphql', url: string) {
     setBusy(true)
@@ -68,7 +69,7 @@ export function App() {
       </div>
       <DetailPanel key={selected?.id ?? 'none'} workspace={workspace} node={selected} status={selectedId ? (statuses[selectedId] ?? 'unverified_no_schema') : 'unverified_no_schema'} onClose={handleClose} onSent={handleSent} />
       {workspace && showHistory && (
-        <HistoryPanel workspace={workspace} onClose={() => setShowHistory(false)} />
+        <HistoryPanel workspace={workspace} onClose={handleCloseHistory} />
       )}
     </div>
   )

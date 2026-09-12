@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { getWorkspaceRequests, type RequestHistoryEntry, type Workspace } from '../api'
 import { nodeLabel } from '../lib/nodeLabel'
+import { useModalPanel } from '../lib/useModalPanel'
 
 export function HistoryPanel({ workspace, onClose }: { workspace: Workspace; onClose: () => void }) {
+  const closeRef = useModalPanel(true, onClose)
   const [requests, setRequests] = useState<RequestHistoryEntry[]>([])
   const [filterNodeId, setFilterNodeId] = useState('')
 
@@ -17,7 +19,7 @@ export function HistoryPanel({ workspace, onClose }: { workspace: Workspace; onC
   return (
     <div className="history-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className="history-panel" role="dialog" aria-modal="true" aria-label="Request history">
-        <button type="button" className="dive__close" onClick={onClose} aria-label="Close history">Close ✕</button>
+        <button type="button" className="dive__close" onClick={onClose} ref={closeRef} aria-label="Close history">Close ✕</button>
         <h3 className="dive__title">History</h3>
         <select
           className="history-panel__filter" value={filterNodeId}
