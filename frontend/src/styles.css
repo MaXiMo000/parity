@@ -118,3 +118,10 @@ canvas{display:block}
 .auth-logout{background:transparent;border:1px solid var(--hair);color:var(--mute);
   font-family:var(--mono);font-size:10px;padding:9px 16px;border-radius:2px;cursor:pointer;margin-left:8px}
 .auth-logout:hover{border-color:var(--violate);color:var(--violate)}
+
+.credential-panel__label{display:block;font-family:var(--mono);font-size:10px;color:var(--mute);
+  margin:14px 0 4px}
+.credential-panel__label:first-of-type{margin-top:0}
+.credential-panel__actions{display:flex;gap:8px;margin-top:18px}
+.history-panel input{width:100%;background:rgba(255,255,255,.04);border:1px solid var(--hair);
+  color:var(--paper);font-family:var(--mono);font-size:11px;padding:9px 12px;border-radius:2px}

@@ -24,6 +24,8 @@ export interface Workspace {
   schema_kind: 'openapi' | 'graphql'
   base_path: string
   schema_source: string
+  has_credential: boolean
+  credential_header_name: string | null
   nodes: Node[]
   edges: Edge[]
 }
@@ -145,4 +147,20 @@ export function getNodeHistory(workspaceId: string, nodeId: string): Promise<Nod
 export function getWorkspaceRequests(workspaceId: string): Promise<RequestHistoryEntry[]> {
   return fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/requests`, { credentials: 'include' })
     .then((res) => json<RequestHistoryEntry[]>(res))
+}
+
+export function setCredential(workspaceId: string, headerName: string, value: string): Promise<void> {
+  return fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/credential`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ header_name: headerName, value }),
+    credentials: 'include',
+  }).then((res) => json<{ status: string }>(res)).then(() => undefined)
+}
+
+export function clearCredential(workspaceId: string): Promise<void> {
+  return fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/credential`, {
+    method: 'DELETE',
+    credentials: 'include',
+  }).then((res) => json<{ status: string }>(res)).then(() => undefined)
 }

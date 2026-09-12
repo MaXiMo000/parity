@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { createWorkspace, getCurrentUser, getWorkspace, logout, type CurrentUser, type SendResult, type Workspace, GITHUB_LOGIN_URL } from './api'
+import { CredentialPanel } from './components/CredentialPanel'
 import { DetailPanel } from './components/DetailPanel'
 import { HistoryPanel } from './components/HistoryPanel'
 import { WorkspaceForm } from './components/WorkspaceForm'
@@ -15,6 +16,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [showHistory, setShowHistory] = useState(false)
+  const [showCredential, setShowCredential] = useState(false)
   const [currentUser, setCurrentUser] = useState<CurrentUser | null | undefined>(undefined)
 
   useEffect(() => {
@@ -25,6 +27,7 @@ export function App() {
 
   const handleClose = useCallback(() => setSelectedId(null), [])
   const handleCloseHistory = useCallback(() => setShowHistory(false), [])
+  const handleCloseCredential = useCallback(() => setShowCredential(false), [])
 
   function handleCreate(name: string, kind: 'openapi' | 'graphql', url: string) {
     setBusy(true)
@@ -89,6 +92,11 @@ export function App() {
               History
             </button>
           )}
+          {workspace && (
+            <button type="button" className="history-toggle" onClick={() => setShowCredential(true)}>
+              Credential
+            </button>
+          )}
           <WorkspaceForm onCreate={handleCreate} busy={busy} />
         </div>
 
@@ -104,6 +112,13 @@ export function App() {
       <DetailPanel key={selected?.id ?? 'none'} workspace={workspace} node={selected} status={selectedId ? (statuses[selectedId] ?? 'unverified_no_schema') : 'unverified_no_schema'} onClose={handleClose} onSent={handleSent} />
       {workspace && showHistory && (
         <HistoryPanel workspace={workspace} onClose={handleCloseHistory} />
+      )}
+      {workspace && showCredential && (
+        <CredentialPanel
+          workspace={workspace}
+          onClose={handleCloseCredential}
+          onSaved={(updated) => setWorkspace(updated)}
+        />
       )}
     </div>
   )
