@@ -218,3 +218,30 @@ def test_workspace_without_a_credential_reports_it_honestly():
     got = client.get(f"/api/workspaces/{ws['id']}").json()
     assert got["has_credential"] is False
     assert got["credential_header_name"] is None
+
+
+def test_a_rest_workspace_reports_no_virtual_nodes():
+    ws = client.post("/api/workspaces", json={
+        "name": "Petstore", "schema_kind": "openapi", "raw_schema": FIXTURE,
+    }).json()
+    got = client.get(f"/api/workspaces/{ws['id']}").json()
+    assert got["virtual_nodes"] == []
+
+
+def test_a_graphql_workspace_reports_real_root_and_type_hubs():
+    # GRAPHQL_SDL (defined above): one Query field, `pet(id: ID!): Pet` --
+    # a real root hub for Query, and a real type hub for the custom
+    # object type Pet it returns.
+    ws = client.post("/api/workspaces", json={
+        "name": "Pets (GraphQL)", "schema_kind": "graphql", "raw_schema": GRAPHQL_SDL,
+    }).json()
+    got = client.get(f"/api/workspaces/{ws['id']}").json()
+
+    virtual_by_kind = {v["kind"]: v for v in got["virtual_nodes"]}
+    assert virtual_by_kind["graphql_root"] == {"id": "root:Query", "label": "Query", "kind": "graphql_root"}
+    assert virtual_by_kind["graphql_type"] == {"id": "type:Pet", "label": "Pet", "kind": "graphql_type"}
+
+    pet_node_id = got["nodes"][0]["id"]
+    edge_pairs = {(e["from_node"], e["to_node"]) for e in got["edges"]}
+    assert ("root:Query", pet_node_id) in edge_pairs
+    assert (pet_node_id, "type:Pet") in edge_pairs

@@ -12,6 +12,7 @@ from app.auth.dependencies import get_current_user, get_owned_workspace
 from app.crypto import encrypt_credential
 from app.db import get_session
 from app.edges import compute_rest_edges
+from app.graphql_edges import compute_graphql_edges
 from app.models import Node, User, Workspace
 from app.schema.graphql import GraphQLFetchError, GraphQLValidationError, fetch_introspection, parse_graphql
 from app.schema.openapi import OpenAPIFetchError, OpenAPIValidationError, extract_base_path, fetch_spec, parse_openapi
@@ -99,6 +100,17 @@ def get_workspace(workspace_id: str, session: Session = Depends(get_session), cu
         {"id": n["id"], "path_template": n["path_template"]}
         for n in node_dicts if n["path_template"] is not None
     ])
+    virtual_nodes: list[dict] = []
+    if workspace.schema_kind == "graphql":
+        # REST's own edges list stays untouched (compute_rest_edges above
+        # produces nothing for GraphQL nodes, since none of them carry a
+        # path_template) -- this only ever adds a new, parallel path.
+        graphql_edges, virtual_nodes = compute_graphql_edges([
+            {"id": n["id"], "type_name": n["type_name"], "field_name": n["field_name"],
+             "declared_response_schema": n["declared_response_schema"]}
+            for n in node_dicts
+        ])
+        edges = [*edges, *graphql_edges]
 
     return {
         "id": workspace.id, "name": workspace.name, "schema_kind": workspace.schema_kind,
@@ -107,6 +119,7 @@ def get_workspace(workspace_id: str, session: Session = Depends(get_session), cu
         "credential_header_name": workspace.credential_header_name,
         "nodes": node_dicts,
         "edges": [{"from_node": a, "to_node": b} for a, b in edges],
+        "virtual_nodes": virtual_nodes,
     }
 
 
