@@ -1180,9 +1180,6 @@ SPEC.md §8.3 layout design task, not a small fix, and stays open).
 
 ### Still open (real v2 backlog, not attempted here)
 
-- GraphQL's edge-less 3D graph layout (SPEC.md §8.3's dual-mode
-  type-relationship graph) — a real frontend layout design task, not a
-  small fix; still not attempted, carried from Phase 1b.
 - `same_declared_host`'s own stated v1 scope: hostname-only comparison
   (not full origin/port), and no constraint at all for pasted/uploaded
   schemas with no real source URL — both named above, not defects.
@@ -1190,3 +1187,174 @@ SPEC.md §8.3 layout design task, not a small fix, and stays open).
   object-shallow drift-checking (Phase 2b's own stated scope) — untouched.
 - The one standing manual step: a real production GitHub OAuth app +
   Render deploy (`DEPLOY.md`) — still nobody's done this.
+
+## 2026-09-18: local GitHub OAuth app wired for real, live-verified up to the consent screen
+
+**What/Why**: a real GitHub OAuth App was registered (client id
+`Ov23liZGQJpRikwuRmTZ`) and its credentials were used, for this session
+only, to start the local backend and confirm the real OAuth redirect
+actually works end to end up to GitHub's own consent screen — the exact
+boundary Phase 3a's own HANDOFF section stopped at with a fake `dev`
+client id.
+
+**What was verified, live, against the real GitHub OAuth endpoint**: with
+the real client id/secret and `GITHUB_CALLBACK_URL=http://localhost:8123/api/auth/github/callback`
+passed as process environment variables (never written to any file — no
+`.env` was created, nothing was committed), clicking "Sign in with
+GitHub" in a real browser redirected to a real
+`https://github.com/login?client_id=Ov23liZGQJpRikwuRmTZ&return_to=...`
+URL whose decoded `return_to` carried the exact real `client_id`,
+`redirect_uri`, and a fresh CSRF `state` — and GitHub's own page read
+**"Sign in to GitHub to continue to parity"**, which GitHub only shows
+for a genuinely recognized, validly-registered app (an unrecognized
+`client_id` or a `redirect_uri` that doesn't match the app's registered
+callback produces a GitHub error page instead of a normal login form, per
+Phase 3a's own documented understanding of this boundary). This is
+stronger confirmation than Phase 3a's own fake-`dev`-client-id check
+could ever produce.
+
+**What this explicitly does NOT cover, same discipline as every phase
+since 3a**: no login was completed and no consent screen was clicked
+through — entering GitHub credentials or approving an OAuth consent grant
+on the user's behalf is out of bounds regardless of how well the app is
+wired. The session stopped exactly at the point where GitHub's own login
+form appeared. A human still needs to actually sign in once to close this
+gap for good, per `AUTH_SETUP.md`.
+
+This client id/secret pair was for local dev only (its registered
+callback is `http://localhost:8123/...`); per `DEPLOY.md`, a real Render
+deploy needs its own, separately-registered production OAuth app.
+
+## 2026-09-18: GraphQL type-relationship 3D layout — built, live-verified at the API level
+
+**What/Why**: closes the last remaining named v1-scope gap — "GraphQL
+nodes render with no edges," carried since Phase 1b and deliberately left
+out of the 2026-09-17 backlog session as real design work rather than a
+quick fix. Full design reasoning lives in
+`docs/superpowers/plans/2026-09-18-graphql-type-relationship-layout.md`
+(written first, per that plan's own Option A/B tradeoff discussion);
+this entry covers what actually got built against it.
+
+**What was built** (Option B from the plan — synthetic root/type hub
+nodes, the literal SPEC.md §8.3 picture, not the cheaper shared-type-only
+approximation):
+
+- **`backend/app/graphql_edges.py`** (new): `compute_graphql_edges`
+  produces a real edge list plus a list of synthetic, non-persisted "hub"
+  node descriptors — one `graphql_root` hub per root type (`Query`/
+  `Mutation`) with an edge to every one of its fields, and one
+  `graphql_type` hub per distinct *non-scalar* return type with an edge
+  from every field that returns it. Scalar return types (`String`/`Int`/
+  `Float`/`ID`/`Boolean`) deliberately get no shared hub — stated in the
+  plan and re-verified here, not a defect. Hub ids are deterministic
+  (`"root:Query"`, `"type:Pet"`), so they're stable across repeated
+  fetches of the same workspace.
+- **`get_workspace` route**: merges `compute_graphql_edges`'s output into
+  the existing response for `schema_kind == "graphql"` workspaces — a new
+  top-level `virtual_nodes` field (always `[]` for OpenAPI workspaces, so
+  the frontend never needs an `undefined` check), and the new edges
+  appended to the existing `edges` list. REST's own `compute_rest_edges`
+  path is completely untouched.
+- **Frontend**: `Workspace.virtual_nodes: VirtualNode[]` (new type,
+  `api.ts`); `computeLayout` (`layout.ts`) now takes an optional third
+  `virtualNodes` argument and places them in the *same* force simulation
+  as real nodes (so a hub naturally settles at the center of the fields
+  that actually point to it, rather than a second, independently-tuned
+  layout pass), returning `{nodes, virtualNodes}` as two separate maps
+  instead of one bare map — real vs. synthetic stays distinguishable
+  after layout, not just before it. New `HubNode.tsx`: a wireframe
+  icosahedron (root hubs, larger) or octahedron (type hubs, smaller) with
+  a floating text label (`@react-three/drei`'s `Text`, already a
+  dependency — no new one added), always the neutral `--mute` palette
+  (never `--match`/`--violate` — a hub has no drift status of its own,
+  stated in-code, not just here), and **deliberately not
+  clickable/selectable** — no `onSelect` wiring, matching the plan's own
+  reasoning: there's no per-type detail to show, so inventing a secondary
+  panel for a concept with nothing behind it would be exactly the kind of
+  half-finished surface this codebase avoids elsewhere.
+
+### Verified
+
+- Backend: `cd backend && .venv/Scripts/python -m pytest -q` — **151
+  passed** (real output; up from the 2026-09-17 backlog session's 142 — 7
+  new `compute_graphql_edges` unit tests in `test_graphql_edges.py`
+  covering shared-type hubs, no-hub-for-scalars, per-root edges, a
+  `Query`-only schema producing no `Mutation` hub, deterministic hub ids
+  across repeated calls, a field with no declared response schema still
+  getting its root edge, and the empty-input case; 2 new route-level
+  tests in `test_workspace_routes.py` confirming a REST workspace reports
+  `virtual_nodes: []` and a real GraphQL workspace reports the real root
+  + type hubs with the right edges).
+- Frontend: `cd frontend && npx tsc -b` clean; `npx vitest run` — **20
+  passed across 5 test files** (up from 18 — 2 new `layout.test.ts` cases
+  covering virtual-node placement and the no-virtual-nodes default);
+  `npx vite build` clean.
+- **Live-verified against the real, unmocked `countries.trevorblades.com`
+  GraphQL API** (native Postgres; backend on `:8123`; direct HTTP, the
+  same backend-level verification tier Phase 2a's own HANDOFF used when a
+  full browser click-through wasn't available that session — see the
+  honesty note below for why browser-level verification specifically
+  wasn't completed this time):
+  - Created a real workspace against
+    `https://countries.trevorblades.com/graphql` — the real, known 6
+    nodes (matching every prior phase's own result for this fixture).
+  - `GET /api/workspaces/{id}` returned real `virtual_nodes`: one
+    `root:Query` hub (this API has no `Mutation` fields, so no
+    `root:Mutation` hub was invented) and three real `graphql_type` hubs
+    — `Country`, `Language`, `Continent`.
+  - Confirmed the real edges: every one of the 6 real fields has an edge
+    from `root:Query`; `countries`/`country` both edge to `type:Country`,
+    `languages`/`language` both edge to `type:Language`, `continent`/
+    `continents` both edge to `type:Continent` — **the real proof the
+    LIST-unwrapping leaf-type logic works against a real API's real
+    shape**: `languages` declares `[Language!]!` (a LIST) and `language`
+    declares a bare `Language` (not a list), and both correctly collapsed
+    to the exact same `type:Language` hub rather than being treated as
+    unrelated.
+  - **REST regression check**: created a second real workspace against
+    `https://petstore3.swagger.io/api/v3/openapi.json` — real 19 nodes,
+    real 16 edges (byte-for-byte matching every prior phase's own known
+    Petstore result), `virtual_nodes: []` — confirming this work didn't
+    touch REST's own edge computation at all.
+  - Backend and frontend dev processes were stopped after verification;
+    the native Postgres instance was left running, matching this
+    portfolio's own convention.
+
+### Honesty note: Task 3 (live force-layout tuning) was not completed
+
+The plan's own Task 3 called for tuning the force-simulation constants by
+eye against real rendered content once hubs actually exist, the same way
+`loom`/this project's own original REST constants were tuned. **This did
+not happen this session**: the browser tool's own JS-console session-cookie
+forgery technique — used successfully earlier in this same session (Phase
+3c's and the 2026-09-17 backlog session's own live verifications both
+relied on it) — silently stopped working partway through this session
+(`document.cookie` writes to a cookie literally named `session` stopped
+taking effect, while writes to any other cookie name kept working
+normally; consistent with a deliberate anti-session-hijacking guard in the
+browser tool itself, not a bug in this project's own code). Real GitHub
+login wasn't attempted as a substitute, for the same reason it never has
+been in this repo: entering credentials or clicking through a consent
+screen on the user's behalf is out of bounds. **The force constants
+(`charge().strength(-6)`, `link().distance(2.2)`, unchanged from REST's
+own original Phase 0 tuning) are therefore unverified for the GraphQL
+hub-heavy shape** — the API-level verification above proves the *data* is
+correct (real hubs, real edges, real deduplication), but nobody has
+visually confirmed hubs don't overlap their own fanned-out fields in a
+real rendered scene. This is a real, named gap, not a completed task —
+the next session with real interactive-browser access should do this
+before calling the GraphQL layout plan's Task 3 done.
+
+### Next
+
+No more phases remain in `SPEC.md`'s own build order or in the
+carried-over v1-scope-gap backlog this repo has been tracking since Phase
+2b. What's left, in full:
+
+- Live force-layout tuning for the GraphQL hub shape (immediately above).
+- The one standing manual step: a human completing a real GitHub login
+  once (local) and a real Render deploy (`DEPLOY.md`) — the only things
+  left that no automated session can do.
+- `same_declared_host`'s and GraphQL matching's own already-stated v1
+  scope limits (Phase 2b/2026-09-17's own HANDOFF entries) — not defects,
+  real v2 work if ever wanted.
