@@ -1358,3 +1358,113 @@ carried-over v1-scope-gap backlog this repo has been tracking since Phase
 - `same_declared_host`'s and GraphQL matching's own already-stated v1
   scope limits (Phase 2b/2026-09-17's own HANDOFF entries) — not defects,
   real v2 work if ever wanted.
+
+## 2026-09-18: Security hardening — rate limiting, CSRF, body/response size caps, Pydantic models
+
+**What/Why**: a direct request for a full security audit ("is everything
+fully secured, nothing left") got an honest "no" — four real gaps, listed
+in full in `docs/superpowers/plans/2026-09-18-security-hardening.md`.
+This entry covers what was actually built against that plan, task by
+task, all in this same session.
+
+**What was built**:
+
+- **Task 1 — rate limiting + body/response size caps**: `slowapi`
+  (in-memory — correct for this deploy's one-instance `render.yaml`
+  topology, not a corner cut), keyed by session user id when logged in,
+  IP otherwise (`app/ratelimit.py`). `POST /api/workspaces` and
+  `POST .../requests` capped at 10/min and 20/min (the two routes that
+  make the backend fire real outbound traffic); `GET/POST
+  /api/auth/github/*` capped at 10/min against brute-force-style abuse.
+  `MaxBodySizeMiddleware` (`app/body_limit.py`) rejects any request over
+  2 MiB by declared Content-Length before the body is ever read — added
+  outermost, so it runs before session/auth handling (live-verified: an
+  oversized *unauthenticated* request gets a real 413, not a 401).
+  `ssrf_guard.py`'s response reading is now streamed and capped at
+  10 MiB, raising `ResponseTooLargeError` the moment the cap is crossed
+  instead of buffering an unbounded target response into memory (and,
+  previously, into Postgres) — the streaming rewrite was verified not to
+  corrupt or truncate a normal response (a new regression test), and the
+  cap itself is tested at the exact byte boundary.
+- **Task 2 — CSRF protection**: `require_csrf`
+  (`app/auth/dependencies.py`) — a random token generated on real login,
+  stored in the session, exposed via `GET /api/auth/me`, and required
+  back as `X-CSRF-Token` on every mutating route (`POST /workspaces`,
+  `POST .../requests`, `PUT`/`DELETE .../credential`, `POST
+  /auth/logout`). Closes a real gap: production's `SameSite=None` cookie
+  (required for the split-origin deploy) removes SameSite's own CSRF
+  protection, and CORS only blocks a cross-site page from *reading* a
+  response, not from a hidden form *firing* the mutating request with the
+  ambient session cookie. Constant-time comparison
+  (`secrets.compare_digest`). `tests/conftest.py`'s `login_as` now embeds
+  a real token in the forged test session and sets it as a default
+  header on the client, so every pre-existing test in this suite kept
+  working with zero per-call-site changes — the adversarial proof (no
+  token / wrong token / **another real session's genuinely valid
+  token** / the real matching token) lives in its own
+  `tests/test_csrf.py`, plus a live curl-level check against a real
+  running server covering all four cases.
+- **Task 3 — Pydantic request models**: every route's raw `body: dict`
+  (`create_workspace`, `send_request`, `set_credential`, `curl_parse`)
+  replaced with a real, validated schema (`app/schemas.py`) — malformed
+  input rejected by FastAPI's own validation before a handler runs, not
+  by hand-rolled `dict.get()` checks. Deliberately behavior-preserving
+  (every custom validator mirrors the manual check it replaces,
+  including `raw_schema`'s original dict/str truthiness), confirmed
+  against the full existing suite with no changes needed beyond one new
+  test — which caught a **real, previously-unprotected 500**: the old
+  `headers = body.get("headers") or {}` had no type check at all, so a
+  truthy non-dict value (e.g. a JSON array) would sail through and crash
+  the first time `redact_headers()` called `.items()` on it.
+  `headers: dict[str, str]` now rejects it cleanly with a 422.
+- **Task 4 — dependency vulnerability**: `npm audit`'s one finding
+  (`@vitest/mocker`, moderate, dev/test-only) had no non-breaking fix.
+  Tried deliberately (`npm audit fix --force`, a `vitest` 3→5 major
+  bump) rather than skipped or taken blindly: `tsc` clean, all 20 tests
+  pass, production build clean. `npm audit` now reports 0
+  vulnerabilities.
+
+### Verified
+
+- Backend: `cd backend && .venv/Scripts/python -m pytest -q` — **167
+  passed** (real output; up from the GraphQL-layout session's 151 — 16
+  new tests across `test_ssrf_guard.py`, `test_rate_limit.py` (new),
+  `test_body_limit.py` (new), `test_csrf.py` (new), and
+  `test_request_routes.py`).
+- Frontend: `cd frontend && npx tsc -b` clean; `npx vitest run` (now on
+  vitest 5.0.1) — **20 passed across 5 test files**, unchanged count
+  (this session's frontend work was the CSRF-token plumbing in `api.ts`,
+  which has no new unit-testable branch beyond what already-passing
+  tests exercise); `npx vite build` clean.
+- **Live-verified against real running servers, not just mocked tests**,
+  for every task: 10 real `/auth/github/login` redirects succeed, the
+  11th gets a real 429; a real 3 MB POST body gets a real 413 before auth
+  even runs; a real session's `GET /api/auth/me` returns its real
+  `csrf_token`, and `POST /api/workspaces` with no token / the wrong
+  token / the real token produce real 403/403/201 respectively; a real
+  workspace created against the live Petstore API still returns real 19
+  nodes through the new Pydantic model, and a missing `name` / an invalid
+  `schema_kind` both cleanly 422.
+- The browser-cookie-forgery technique used for full UI-driven
+  verification in earlier sessions remained unavailable this session (see
+  the GraphQL-layout entry above) — all live verification this session
+  was therefore backend-level (curl against a real running server), the
+  same tier Phase 2a's own HANDOFF used under the same constraint. No
+  full click-through-the-actual-UI verification of the CSRF flow was
+  performed; the underlying HTTP contract it depends on was, exhaustively.
+
+### What this explicitly does NOT cover (named in the plan, not attempted)
+
+- Distributed/Redis-backed rate limiting — this deploy is one instance;
+  revisit only if the topology changes.
+- Security response headers (CSP/HSTS/X-Frame-Options) on the static
+  frontend — a Render static-site config concern, not application code.
+- A full secrets-manager migration for `FERNET_KEY`/`SESSION_SECRET_KEY`
+  — already honestly scoped in SPEC.md §7.4.
+
+### Next
+
+Everything from this session's own plan is closed. What remains,
+unchanged from the previous entry: live force-layout tuning for the
+GraphQL hubs, and the one standing manual step (a real GitHub login +
+Render deploy).
