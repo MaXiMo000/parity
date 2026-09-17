@@ -15,6 +15,7 @@ dependencies = [
     "graphql-core>=3.2",
     "itsdangerous>=2.0",
     "cryptography>=42.0",
+    "slowapi>=0.1.9",
 ]
 
 [project.optional-dependencies]

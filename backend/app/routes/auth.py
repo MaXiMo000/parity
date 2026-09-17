@@ -15,11 +15,16 @@ from app.auth.dependencies import get_current_user
 from app.auth.github import GitHubOAuthError, build_authorize_url, exchange_code_for_token, fetch_github_user, new_state
 from app.db import get_session
 from app.models import User
+from app.ratelimit import limiter
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 @router.get("/github/login")
+# 10/minute per IP (no session exists yet at this point in the flow, so
+# rate_limit_key falls back to remote address) -- bounds brute-force-style
+# abuse of the OAuth redirect itself (2026-09-18 security-hardening plan).
+@limiter.limit("10/minute")
 def github_login(request: Request):
     state = new_state()
     # A list, not a single scalar -- opening "Sign in with GitHub" in two
@@ -37,6 +42,7 @@ def github_login(request: Request):
 
 
 @router.get("/github/callback")
+@limiter.limit("10/minute")
 def github_callback(request: Request, code: str, state: str, session: Session = Depends(get_session)):
     states = request.session.get("oauth_states", [])
     if state not in states:

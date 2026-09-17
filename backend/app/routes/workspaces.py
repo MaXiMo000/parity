@@ -5,7 +5,7 @@ entirely."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user, get_owned_workspace
@@ -14,6 +14,7 @@ from app.db import get_session
 from app.edges import compute_rest_edges
 from app.graphql_edges import compute_graphql_edges
 from app.models import Node, User, Workspace
+from app.ratelimit import limiter
 from app.schema.graphql import GraphQLFetchError, GraphQLValidationError, fetch_introspection, parse_graphql
 from app.schema.openapi import OpenAPIFetchError, OpenAPIValidationError, extract_base_path, fetch_spec, parse_openapi
 
@@ -21,7 +22,11 @@ router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
 
 
 @router.post("", status_code=201)
-def create_workspace(body: dict, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)) -> dict:
+# 10/minute: this route fetches a real remote schema URL on the caller's
+# behalf (2026-09-18 security-hardening plan) -- the same "backend fires
+# real outbound traffic" abuse shape as the request-proxy route below.
+@limiter.limit("10/minute")
+def create_workspace(request: Request, body: dict, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)) -> dict:
     name = body.get("name")
     schema_kind = body.get("schema_kind")
     url = body.get("schema_source_url")

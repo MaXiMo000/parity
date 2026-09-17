@@ -30,6 +30,19 @@ SENSITIVE_HEADERS = {"authorization", "cookie", "proxy-authorization", "set-cook
 
 _EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=8)
 
+# 2026-09-18 security-hardening plan: closes "no response-size cap on
+# proxied requests" -- previously the full body of whatever a target
+# returned was read into memory (and later persisted to Postgres) with no
+# upper bound, a real resource-exhaustion vector for a misbehaving or
+# malicious target. Streamed and counted as it arrives (below), not
+# checked against a Content-Length header alone -- a target can omit or
+# lie about Content-Length and stream more than it declared.
+MAX_RESPONSE_BYTES = 10 * 1024 * 1024  # 10 MiB
+
+
+class ResponseTooLargeError(Exception):
+    pass
+
 
 def _resolve_safe_ip(hostname: str) -> str | None:
     """Resolves hostname and returns the first candidate IP to pin the
@@ -88,10 +101,33 @@ def _send_with_wall_clock(req: httpx.Request, timeout: float) -> httpx.Response:
     directly, Phase 2a's final review, finding I4: 20 one-second drips
     completed in ~20s against Client(timeout=15.0)). The abandoned thread
     on a real timeout is bounded by its own httpx timeout and the
-    fixed-size pool -- it is not join()'d, but it cannot run forever."""
+    fixed-size pool -- it is not join()'d, but it cannot run forever.
+
+    Streams the body and counts real bytes as they arrive, raising
+    ResponseTooLargeError the moment MAX_RESPONSE_BYTES is crossed --
+    never buffers an unbounded body before checking (2026-09-18
+    security-hardening plan). The final httpx.Response is rebuilt from
+    the collected bytes so every caller's existing `.status_code`/
+    `.headers`/`.text`/`.json()` usage is unaffected."""
     def _do_send() -> httpx.Response:
         with httpx.Client(timeout=timeout) as client:
-            return client.send(req, follow_redirects=False)
+            streamed = client.send(req, follow_redirects=False, stream=True)
+            try:
+                chunks: list[bytes] = []
+                total = 0
+                for chunk in streamed.iter_bytes():
+                    total += len(chunk)
+                    if total > MAX_RESPONSE_BYTES:
+                        raise ResponseTooLargeError(
+                            f"response exceeded {MAX_RESPONSE_BYTES} bytes before it finished"
+                        )
+                    chunks.append(chunk)
+            finally:
+                streamed.close()
+            return httpx.Response(
+                streamed.status_code, headers=streamed.headers,
+                content=b"".join(chunks), request=streamed.request,
+            )
 
     future = _EXECUTOR.submit(_do_send)
     return future.result(timeout=timeout)
@@ -132,6 +168,8 @@ def send_pinned(
         raise
     except concurrent.futures.TimeoutError:
         raise error_cls(f"{url} did not respond within {timeout}s")
+    except ResponseTooLargeError as exc:
+        raise error_cls(f"{url}: {exc}") from exc
     except Exception as exc:  # noqa: BLE001 -- _build_pinned_request can raise httpx.InvalidURL
         # (not an httpx.HTTPError subclass) on a malformed URL, and the
         # actual send can raise httpx.HTTPError on a network failure --
@@ -163,6 +201,8 @@ def send_pinned(
             raise
         except concurrent.futures.TimeoutError:
             raise error_cls(f"{location} did not respond within {timeout}s")
+        except ResponseTooLargeError as exc:
+            raise error_cls(f"{location}: {exc}") from exc
         except Exception as exc:  # noqa: BLE001 -- same reasoning as above
             raise error_cls(f"could not reach {location}: {exc}") from exc
     return resp

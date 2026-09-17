@@ -3,9 +3,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from starlette.middleware.sessions import SessionMiddleware
 
+from app.body_limit import MaxBodySizeMiddleware
 from app.db import SessionLocal, ensure_default_user
+from app.ratelimit import limiter
 from app.routes.auth import router as auth_router
 from app.routes.workspaces import router as workspaces_router
 from app.routes.requests import router as requests_router
@@ -54,6 +58,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="parity", version="0.1.0", lifespan=lifespan)
 
+# 2026-09-18 security-hardening plan: real per-route rate limits (see
+# app/routes/*.py's @limiter.limit(...) decorators) and a hard cap on
+# every request's declared body size, closing two real gaps a direct
+# security audit found ("no rate limiting anywhere", "no request-body
+# size cap on parity's own API").
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.environ.get("SESSION_SECRET_KEY", "dev-only-insecure-secret-change-before-any-real-deploy"),
@@ -75,6 +87,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Added last -- Starlette's most-recently-added middleware runs
+# outermost, so an oversized request is rejected before CORS/session
+# processing even runs, not just before a route handler reads the body.
+app.add_middleware(MaxBodySizeMiddleware)
 
 app.include_router(auth_router)
 app.include_router(workspaces_router)

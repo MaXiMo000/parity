@@ -9,7 +9,7 @@ import httpx
 import pytest
 import respx
 
-from app.proxy.ssrf_guard import _resolve_safe_ip, send_pinned
+from app.proxy.ssrf_guard import MAX_RESPONSE_BYTES, _resolve_safe_ip, send_pinned
 
 
 class _FetchError(Exception):
@@ -117,6 +117,49 @@ def test_send_pinned_strips_the_body_on_a_cross_host_redirect(monkeypatch):
     send_pinned("POST", "https://example.invalid/old", _FetchError, content=b"sensitive-body-data")
     sent_content = respx.calls.last.request.content
     assert sent_content == b""
+
+
+@respx.mock
+def test_send_pinned_returns_the_real_body_unchanged_for_a_normal_response(monkeypatch):
+    # The streaming rewrite (2026-09-18 security-hardening plan) must not
+    # corrupt or truncate an ordinary, well-under-the-cap response --
+    # this is the real regression check for that rewrite.
+    monkeypatch.setattr(
+        socket, "getaddrinfo",
+        lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],
+    )
+    respx.get("https://93.184.216.34/ok").mock(
+        return_value=httpx.Response(200, json={"real": "content", "n": 42})
+    )
+    resp = send_pinned("GET", "https://example.invalid/ok", _FetchError)
+    assert resp.status_code == 200
+    assert resp.json() == {"real": "content", "n": 42}
+
+
+@respx.mock
+def test_send_pinned_rejects_a_response_over_the_size_cap(monkeypatch):
+    monkeypatch.setattr(
+        socket, "getaddrinfo",
+        lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],
+    )
+    respx.get("https://93.184.216.34/huge").mock(
+        return_value=httpx.Response(200, content=b"x" * (MAX_RESPONSE_BYTES + 1))
+    )
+    with pytest.raises(_FetchError):
+        send_pinned("GET", "https://example.invalid/huge", _FetchError)
+
+
+@respx.mock
+def test_send_pinned_accepts_a_response_exactly_at_the_size_cap(monkeypatch):
+    monkeypatch.setattr(
+        socket, "getaddrinfo",
+        lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],
+    )
+    respx.get("https://93.184.216.34/exact").mock(
+        return_value=httpx.Response(200, content=b"x" * MAX_RESPONSE_BYTES)
+    )
+    resp = send_pinned("GET", "https://example.invalid/exact", _FetchError)
+    assert len(resp.content) == MAX_RESPONSE_BYTES
 
 
 @respx.mock

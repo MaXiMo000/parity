@@ -11,6 +11,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi import Request as FastAPIRequest
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user, get_owned_workspace
@@ -21,6 +22,7 @@ from app.drift.rest import check_rest_drift
 from app.matching import match_graphql_node, match_rest_node, same_declared_host
 from app.models import DriftFinding, Node, Request, Response, User, Workspace
 from app.proxy.client import ProxyError, fire_request
+from app.ratelimit import limiter
 from app.redact import redact_headers
 
 router = APIRouter(prefix="/api/workspaces", tags=["requests"])
@@ -36,7 +38,14 @@ def _safe_json(text: str | None) -> Any:
 
 
 @router.post("/{workspace_id}/requests", status_code=201)
-def send_request(workspace_id: str, body: dict, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)) -> dict:
+# 20/minute: this route fires a real outbound HTTP request through the
+# SSRF-guarded proxy on the caller's behalf -- the exact abuse shape
+# named in the 2026-09-18 security-hardening plan (a logged-in session
+# using parity's own backend as a request-amplifier against a third
+# party). aliased as FastAPIRequest since `Request` above is the ORM
+# model, not Starlette's.
+@limiter.limit("20/minute")
+def send_request(request: FastAPIRequest, workspace_id: str, body: dict, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)) -> dict:
     workspace = get_owned_workspace(workspace_id, current_user, session)
 
     method = body.get("method")

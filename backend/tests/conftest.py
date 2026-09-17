@@ -16,6 +16,7 @@ from sqlalchemy import text
 
 from app.db import DEFAULT_USER_ID, SessionLocal, engine, ensure_default_user
 from app.models import Base
+from app.ratelimit import limiter
 
 TEST_SESSION_SECRET = "test-only-session-secret"
 os.environ.setdefault("SESSION_SECRET_KEY", TEST_SESSION_SECRET)
@@ -23,6 +24,15 @@ os.environ.setdefault("GITHUB_CLIENT_ID", "test-client-id")
 os.environ.setdefault("GITHUB_CLIENT_SECRET", "test-client-secret")
 os.environ.setdefault("GITHUB_CALLBACK_URL", "http://testserver/api/auth/github/callback")
 os.environ.setdefault("FERNET_KEY", "L3RY_MnUUvW0V0jjkBaLpN7RB1P_yBc-K4jSAG6ZmA0=")
+
+# Real rate limiting (2026-09-18 security-hardening plan) would otherwise
+# break most of this suite: every test file shares one module-level
+# TestClient across dozens of test functions, all hitting the same
+# in-memory limiter bucket (many share the same session user id or the
+# same TestClient fake IP). The limiter's own real behavior is covered by
+# a dedicated test file with it deliberately re-enabled, not by leaving
+# it live for every other test.
+limiter.enabled = False
 
 
 @pytest.fixture(autouse=True)
