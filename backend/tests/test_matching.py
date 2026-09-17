@@ -1,4 +1,4 @@
-from app.matching import match_rest_node
+from app.matching import match_rest_node, same_declared_host
 
 NODES = [
     {"id": "findByStatus", "method": "GET", "path_template": "/pet/findByStatus"},
@@ -90,3 +90,36 @@ def test_a_fragment_spread_as_the_first_selection_does_not_false_match():
     import json
     body = json.dumps({"query": "{ ...petFrag } fragment petFrag on Query { pet { name } }"})
     assert match_graphql_node(GRAPHQL_NODES, body) is None
+
+
+def test_same_declared_host_matches_the_real_declared_api_host():
+    assert same_declared_host(
+        "https://petstore3.swagger.io/api/v3/pet/1",
+        "https://petstore3.swagger.io/api/v3/openapi.json",
+    ) is True
+
+
+def test_same_declared_host_rejects_an_unrelated_host():
+    assert same_declared_host(
+        "https://totally-unrelated.example/pet/1",
+        "https://petstore3.swagger.io/api/v3/openapi.json",
+    ) is False
+
+
+def test_same_declared_host_is_case_insensitive():
+    assert same_declared_host(
+        "https://PetStore3.Swagger.IO/api/v3/pet/1",
+        "https://petstore3.swagger.io/api/v3/openapi.json",
+    ) is True
+
+
+def test_same_declared_host_never_blocks_a_pasted_schema_with_no_real_source_url():
+    # Workspace.schema_source is the literal string "pasted" for any
+    # workspace created from raw/uploaded schema text -- there's no real
+    # source URL to compare against, so this must not invent a false
+    # rejection.
+    assert same_declared_host("https://api.example.com/pet/1", "pasted") is True
+
+
+def test_same_declared_host_rejects_a_request_url_with_no_discernible_host():
+    assert same_declared_host("not-a-url", "https://petstore3.swagger.io/api/v3/openapi.json") is False

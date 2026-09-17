@@ -14,6 +14,42 @@ from urllib.parse import urlparse
 from graphql import FieldNode, GraphQLSyntaxError, OperationDefinitionNode, parse
 
 
+def same_declared_host(request_url: str, workspace_schema_source: str) -> bool:
+    """The shared "does this request's real destination match the
+    workspace's own declared API" check named as the single most
+    significant carried-over gap since Phase 2b's own HANDOFF section:
+    REST matching checked method+path shape only, and GraphQL matching
+    (added that same phase) checked body shape only -- neither looked at
+    *where* the request actually went, so a request aimed at an
+    unrelated host could still match a node purely by path/body shape.
+
+    `workspace_schema_source` is `Workspace.schema_source` -- a real URL
+    when the workspace was created from one, or the literal string
+    `"pasted"` when it was created from raw/uploaded schema text (no real
+    source URL exists to compare against in that case). This is the same
+    origin `frontend/src/components/RequestBuilder.tsx`'s own `guessUrl`
+    already treats as the workspace's real API host for REST, and as the
+    GraphQL endpoint itself for GraphQL -- reusing that existing
+    assumption here, not inventing a new one.
+
+    Stated honestly, not implied as more: this compares hostnames only
+    (case-insensitive), not full origins (scheme/port), and when
+    `workspace_schema_source` has no discernible host (the `"pasted"`
+    case, or any raw-schema/SDL-paste workspace) this returns True --
+    there is no real signal to check against, so it doesn't invent a
+    false rejection. It is not a security boundary (the SSRF guard is);
+    it is a correctness signal so a request to a clearly unrelated host
+    doesn't get miscredited as verifying a node it was never sent to.
+    """
+    declared_host = urlparse(workspace_schema_source).hostname
+    if not declared_host:
+        return True
+    request_host = urlparse(request_url).hostname
+    if not request_host:
+        return False
+    return request_host.lower() == declared_host.lower()
+
+
 def match_rest_node(nodes: list[dict], method: str, url: str, base_path: str) -> dict | None:
     """`nodes` are REST node dicts carrying at least `id`, `method`,
     `path_template`. `base_path` (Workspace.base_path) is stripped from

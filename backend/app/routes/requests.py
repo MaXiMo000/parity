@@ -18,7 +18,7 @@ from app.crypto import CredentialDecryptionError, decrypt_credential
 from app.db import get_session
 from app.drift.graphql import check_graphql_drift
 from app.drift.rest import check_rest_drift
-from app.matching import match_graphql_node, match_rest_node
+from app.matching import match_graphql_node, match_rest_node, same_declared_host
 from app.models import DriftFinding, Node, Request, Response, User, Workspace
 from app.proxy.client import ProxyError, fire_request
 from app.redact import redact_headers
@@ -63,22 +63,28 @@ def send_request(workspace_id: str, body: dict, session: Session = Depends(get_s
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     node: Node | None = None
-    if workspace.schema_kind == "openapi":
-        node_dicts = [
-            {"id": n.id, "method": n.method, "path_template": n.path_template}
-            for n in workspace.nodes
-        ]
-        matched = match_rest_node(node_dicts, method, url, workspace.base_path)
-        if matched:
-            node = session.get(Node, matched["id"])
-    elif workspace.schema_kind == "graphql":
-        graphql_node_dicts = [
-            {"id": n.id, "type_name": n.type_name, "field_name": n.field_name}
-            for n in workspace.nodes
-        ]
-        graphql_matched = match_graphql_node(graphql_node_dicts, req_body)
-        if graphql_matched:
-            node = session.get(Node, graphql_matched["id"])
+    # A request whose real destination isn't the workspace's own declared
+    # API host is never matched to a node, regardless of how well its
+    # path/body shape happens to line up (see same_declared_host's own
+    # docstring -- this closes the host-blind matching gap named in every
+    # HANDOFF section since Phase 2b).
+    if same_declared_host(url, workspace.schema_source):
+        if workspace.schema_kind == "openapi":
+            node_dicts = [
+                {"id": n.id, "method": n.method, "path_template": n.path_template}
+                for n in workspace.nodes
+            ]
+            matched = match_rest_node(node_dicts, method, url, workspace.base_path)
+            if matched:
+                node = session.get(Node, matched["id"])
+        elif workspace.schema_kind == "graphql":
+            graphql_node_dicts = [
+                {"id": n.id, "type_name": n.type_name, "field_name": n.field_name}
+                for n in workspace.nodes
+            ]
+            graphql_matched = match_graphql_node(graphql_node_dicts, req_body)
+            if graphql_matched:
+                node = session.get(Node, graphql_matched["id"])
 
     persisted_headers = redact_headers(headers)
     if workspace.credential_header_name:

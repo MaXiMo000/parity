@@ -329,6 +329,59 @@ def test_send_a_real_graphql_request_that_matches_and_drifts(monkeypatch):
 
 
 @respx.mock
+def test_a_request_to_an_unrelated_host_is_unverified_no_match_even_if_the_path_shape_matches(monkeypatch):
+    # The host-blind matching gap named in every HANDOFF section since
+    # Phase 2b: a request aimed at a completely different host than the
+    # workspace's own declared API must not be credited as verifying a
+    # node just because its path happens to look like one, once the
+    # workspace has a real declared source URL to check against.
+    _fake_getaddrinfo(monkeypatch)
+    respx.get("https://93.184.216.34/openapi.json").mock(return_value=httpx.Response(200, json=FIXTURE))
+    ws = client.post("/api/workspaces", json={
+        "name": "Petstore (real URL)", "schema_kind": "openapi",
+        "schema_source_url": "https://example.invalid/openapi.json",
+    }).json()
+
+    respx.get("https://93.184.216.34/api/v3/pet/1").mock(
+        return_value=httpx.Response(200, json={"id": 1, "name": "Fido", "photoUrls": []})
+    )
+    r = client.post(f"/api/workspaces/{ws['id']}/requests", json={
+        # Same DNS-pinned IP as the workspace's own declared host above
+        # (both resolve through the same faked getaddrinfo), but a
+        # different hostname -- exactly the case a host-blind matcher
+        # would wrongly credit.
+        "method": "GET", "url": "https://totally-unrelated.invalid/api/v3/pet/1", "headers": {}, "body": None,
+    })
+    assert r.status_code == 201
+    body = r.json()
+    assert body["request"]["node_id"] is None
+    assert body["drift_finding"]["status"] == "unverified_no_match"
+
+
+@respx.mock
+def test_a_request_to_the_workspaces_own_declared_host_still_matches_normally(monkeypatch):
+    # The positive control for the test above -- confirms the host check
+    # doesn't just block everything once a workspace has a real source URL.
+    _fake_getaddrinfo(monkeypatch)
+    respx.get("https://93.184.216.34/openapi.json").mock(return_value=httpx.Response(200, json=FIXTURE))
+    ws = client.post("/api/workspaces", json={
+        "name": "Petstore (real URL)", "schema_kind": "openapi",
+        "schema_source_url": "https://example.invalid/openapi.json",
+    }).json()
+
+    respx.get("https://93.184.216.34/api/v3/pet/1").mock(
+        return_value=httpx.Response(200, json={"id": 1, "name": "Fido", "photoUrls": []})
+    )
+    r = client.post(f"/api/workspaces/{ws['id']}/requests", json={
+        "method": "GET", "url": "https://example.invalid/api/v3/pet/1", "headers": {}, "body": None,
+    })
+    assert r.status_code == 201
+    body = r.json()
+    assert body["request"]["node_id"] is not None
+    assert body["drift_finding"]["status"] == "matched"
+
+
+@respx.mock
 def test_send_a_graphql_request_that_matches_no_field_is_unverified_no_match(monkeypatch):
     _fake_getaddrinfo(monkeypatch)
     ws = client.post("/api/workspaces", json={
