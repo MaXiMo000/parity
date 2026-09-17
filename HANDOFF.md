@@ -1102,3 +1102,91 @@ account and a real GitHub account needs to spend ~15 minutes clicking
 through `DEPLOY.md` once. After that, the carried-over gaps above (listed
 in full in Phase 2b's own HANDOFF section) are the real v2 backlog, not
 new work this repo's build order ever promised for v1.
+
+## 2026-09-17: v2 backlog — node sizing by call frequency + host-blind matching fix, live-verified
+
+**What/Why**: with the one remaining Phase 3c manual step (registering a
+real production GitHub OAuth app + Render deploy) blocked on a human
+with real accounts, this closes two of the three named carried-over
+gaps in the meantime — the two that were real code gaps, not frontend
+design work (GraphQL's edge-less 3D layout, the third gap, is a real
+SPEC.md §8.3 layout design task, not a small fix, and stays open).
+
+**What was built**:
+
+- **Node size now reflects real call frequency** (`frontend/src/lib/nodeSize.ts`,
+  new): SPEC.md §8.3 says "Size = real call frequency (`node.call_count`)
+  ... a real signal, not decoration" — `Node.call_count` has been tracked
+  correctly on the backend since Phase 2a but every node rendered at the
+  same fixed radius regardless. `nodeRadius(callCount)` log-scales the
+  sphere radius from the original fixed `0.55` (a never-called node is
+  visually identical to every prior phase — no regression) up to a capped
+  `1.1` (so one very hot node can't dwarf the graph or swallow its
+  force-laid-out neighbors). Wired into `frontend/src/scene/Node.tsx`'s
+  `sphereGeometry` args, replacing the hardcoded `0.55`.
+- **Host-blind request-matching, closed** (`backend/app/matching.py::same_declared_host`):
+  named as "the single most significant open item" in Phase 2b's own
+  HANDOFF section and carried unfixed through 3a/3b/3c. REST matching
+  checked method+path shape only; GraphQL matching checked body shape
+  only — neither checked *where* the request actually went, so a request
+  fired at a completely unrelated host could still be credited as
+  verifying a node purely because its path (or GraphQL field name)
+  happened to line up. `same_declared_host(request_url,
+  workspace.schema_source)` compares hostnames (case-insensitive) before
+  either matcher runs; `app/routes/requests.py`'s matching block is now
+  gated on it. **Stated v1 scope, not implied as more**: this reuses
+  `Workspace.schema_source` as the "declared API host" proxy — the same
+  simplification `RequestBuilder.tsx`'s own `guessUrl` already makes (the
+  spec-doc host and the real API host are assumed the same; SPEC.md never
+  modeled these as separately trackable) — not a new column, no
+  migration. A workspace created from pasted/uploaded raw schema text has
+  `schema_source == "pasted"` (no real host to check against); the
+  function returns `True` (no constraint) in that case rather than
+  inventing a false rejection — verified explicitly by its own test.
+
+### Verified
+
+- Backend: `cd backend && .venv/Scripts/python -m pytest -q` — **142
+  passed** (real output; up from Phase 3c's 135 — 5 new `same_declared_host`
+  unit tests in `test_matching.py`, 2 new adversarial integration tests in
+  `test_request_routes.py`).
+- Frontend: `cd frontend && npx tsc -b` clean; `npx vitest run` — **18
+  passed across 6 test files** (up from Phase 3c's 15 — 3 new
+  `nodeRadius` tests in `test/lib/nodeSize.test.ts` covering the
+  no-regression-at-zero-calls case, monotonic growth, and the cap).
+- **Live-verified against the real, unmocked Petstore API** (native
+  Postgres per Phase 3c's own environment note; backend on `:8123`,
+  no browser needed for this check — direct HTTP, same technique Phase
+  2a's own verification used):
+  - Created a real workspace against
+    `https://petstore3.swagger.io/api/v3/openapi.json` — the real,
+    known 19 nodes.
+  - Fired a real `GET` at `https://httpbin.org/api/v3/pet/1` — a real,
+    different, live host, with a path shape that would have matched the
+    `getPetById` (`/pet/{petId}`) node under the old host-blind matcher.
+    Got a real `404` from the real httpbin.org, and — the actual point of
+    this check — `request.node_id: null`, `drift_finding.status:
+    "unverified_no_match"`, confirming the fix holds against a real
+    request to a real unrelated server, not just a mocked one.
+  - Fired a real `GET` at
+    `https://petstore3.swagger.io/api/v3/pet/findByStatus?status=available`
+    (the workspace's own real declared host) immediately after — got a
+    real `200` with real pet data, `node_id` resolved to the real
+    `findByStatus` node — confirming the fix doesn't over-correct into
+    blocking legitimate same-host requests.
+  - Backend and frontend dev processes were stopped after verification;
+    the native Postgres instance was left running, matching this
+    portfolio's own convention.
+
+### Still open (real v2 backlog, not attempted here)
+
+- GraphQL's edge-less 3D graph layout (SPEC.md §8.3's dual-mode
+  type-relationship graph) — a real frontend layout design task, not a
+  small fix; still not attempted, carried from Phase 1b.
+- `same_declared_host`'s own stated v1 scope: hostname-only comparison
+  (not full origin/port), and no constraint at all for pasted/uploaded
+  schemas with no real source URL — both named above, not defects.
+- GraphQL matching's first-operation/first-field-only scope and
+  object-shallow drift-checking (Phase 2b's own stated scope) — untouched.
+- The one standing manual step: a real production GitHub OAuth app +
+  Render deploy (`DEPLOY.md`) — still nobody's done this.
