@@ -69,17 +69,25 @@ export interface CurrentUser {
   username: string
 }
 
-export const GITHUB_LOGIN_URL = '/api/auth/github/login'
+// Split-origin deploys (frontend and backend on different real domains,
+// per SPEC.md's own deploy-readiness goal, Phase 3c) need an absolute
+// backend URL -- same-origin local dev keeps working unchanged because
+// an empty prefix plus Vite's dev-server proxy (vite.config.ts) resolves
+// '/api/...' exactly as before. Set VITE_API_BASE_URL at build time (see
+// DEPLOY.md) for a real split-origin deploy; leave it unset for local dev.
+const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
+
+export const GITHUB_LOGIN_URL = `${API_BASE}/api/auth/github/login`
 
 export function getCurrentUser(): Promise<CurrentUser | null> {
-  return fetch('/api/auth/me', { credentials: 'include' }).then((res) => {
+  return fetch(`${API_BASE}/api/auth/me`, { credentials: 'include' }).then((res) => {
     if (res.status === 401) return null
     return json<CurrentUser>(res)
   })
 }
 
 export function logout(): Promise<void> {
-  return fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).then(() => undefined)
+  return fetch(`${API_BASE}/api/auth/logout`, { method: 'POST', credentials: 'include' }).then(() => undefined)
 }
 
 async function json<T>(res: Response): Promise<T> {
@@ -99,7 +107,7 @@ export function createWorkspace(
     'url' in source
       ? { name, schema_kind: kind, schema_source_url: source.url }
       : { name, schema_kind: kind, raw_schema: source.rawSchema }
-  return fetch('/api/workspaces', {
+  return fetch(`${API_BASE}/api/workspaces`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -108,11 +116,11 @@ export function createWorkspace(
 }
 
 export function listWorkspaces(): Promise<WorkspaceSummary[]> {
-  return fetch('/api/workspaces', { credentials: 'include' }).then((res) => json<WorkspaceSummary[]>(res))
+  return fetch(`${API_BASE}/api/workspaces`, { credentials: 'include' }).then((res) => json<WorkspaceSummary[]>(res))
 }
 
 export function getWorkspace(id: string): Promise<Workspace> {
-  return fetch(`/api/workspaces/${encodeURIComponent(id)}`, { credentials: 'include' }).then((res) => json<Workspace>(res))
+  return fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(id)}`, { credentials: 'include' }).then((res) => json<Workspace>(res))
 }
 
 export function sendRequest(
@@ -122,7 +130,7 @@ export function sendRequest(
   headers: Record<string, string>,
   body: string | null,
 ): Promise<SendResult> {
-  return fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/requests`, {
+  return fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(workspaceId)}/requests`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ method, url, headers, body }),
@@ -131,7 +139,7 @@ export function sendRequest(
 }
 
 export function curlParse(curl: string): Promise<CurlParseResult> {
-  return fetch('/api/curl-parse', {
+  return fetch(`${API_BASE}/api/curl-parse`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ curl }),
@@ -140,17 +148,17 @@ export function curlParse(curl: string): Promise<CurlParseResult> {
 }
 
 export function getNodeHistory(workspaceId: string, nodeId: string): Promise<NodeHistoryEntry[]> {
-  return fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/nodes/${encodeURIComponent(nodeId)}/history`, { credentials: 'include' })
+  return fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(workspaceId)}/nodes/${encodeURIComponent(nodeId)}/history`, { credentials: 'include' })
     .then((res) => json<NodeHistoryEntry[]>(res))
 }
 
 export function getWorkspaceRequests(workspaceId: string): Promise<RequestHistoryEntry[]> {
-  return fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/requests`, { credentials: 'include' })
+  return fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(workspaceId)}/requests`, { credentials: 'include' })
     .then((res) => json<RequestHistoryEntry[]>(res))
 }
 
 export function setCredential(workspaceId: string, headerName: string, value: string): Promise<void> {
-  return fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/credential`, {
+  return fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(workspaceId)}/credential`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ header_name: headerName, value }),
@@ -159,7 +167,7 @@ export function setCredential(workspaceId: string, headerName: string, value: st
 }
 
 export function clearCredential(workspaceId: string): Promise<void> {
-  return fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/credential`, {
+  return fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(workspaceId)}/credential`, {
     method: 'DELETE',
     credentials: 'include',
   }).then((res) => json<{ status: string }>(res)).then(() => undefined)
