@@ -118,6 +118,25 @@ def test_send_rejects_a_non_string_body():
     assert r.status_code == 422
 
 
+def test_send_rejects_malformed_headers_instead_of_crashing():
+    # A real gap the Pydantic refactor (2026-09-18 security-hardening
+    # plan, Task 3) closed as a side effect, not the point of the task:
+    # the old manual `body.get("headers") or {}` had no type check at
+    # all, so a truthy non-dict headers value (e.g. a JSON array) would
+    # sail through and later crash with an unhandled 500 the first time
+    # something called `.items()` on it. SendRequestRequest's real
+    # `headers: dict[str, str]` type now rejects this cleanly at the
+    # door.
+    ws = client.post("/api/workspaces", json={
+        "name": "x", "schema_kind": "openapi",
+        "raw_schema": {"openapi": "3.0.0", "info": {"title": "t", "version": "1"}, "paths": {}},
+    }).json()
+    r = client.post(f"/api/workspaces/{ws['id']}/requests", json={
+        "method": "GET", "url": "https://example.invalid/x", "headers": ["not", "a", "dict"], "body": None,
+    })
+    assert r.status_code == 422
+
+
 @respx.mock
 def test_a_real_404_is_unverified_not_a_false_violation(monkeypatch):
     _fake_getaddrinfo(monkeypatch)

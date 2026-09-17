@@ -24,6 +24,7 @@ from app.models import DriftFinding, Node, Request, Response, User, Workspace
 from app.proxy.client import ProxyError, fire_request
 from app.ratelimit import limiter
 from app.redact import redact_headers
+from app.schemas import SendRequestRequest
 
 router = APIRouter(prefix="/api/workspaces", tags=["requests"])
 
@@ -45,17 +46,13 @@ def _safe_json(text: str | None) -> Any:
 # party). aliased as FastAPIRequest since `Request` above is the ORM
 # model, not Starlette's.
 @limiter.limit("20/minute")
-def send_request(request: FastAPIRequest, workspace_id: str, body: dict, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)) -> dict:
+def send_request(request: FastAPIRequest, workspace_id: str, payload: SendRequestRequest, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)) -> dict:
     workspace = get_owned_workspace(workspace_id, current_user, session)
 
-    method = body.get("method")
-    url = body.get("url")
-    headers = body.get("headers") or {}
-    req_body = body.get("body")
-    if not method or not url:
-        raise HTTPException(status_code=422, detail="method and url are required")
-    if req_body is not None and not isinstance(req_body, str):
-        raise HTTPException(status_code=422, detail="body must be a string or null")
+    method = payload.method
+    url = payload.url
+    headers = payload.headers
+    req_body = payload.body
 
     extra_sensitive_headers: frozenset[str] = frozenset()
     if workspace.encrypted_credential and workspace.credential_header_name:

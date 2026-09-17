@@ -15,6 +15,7 @@ from app.edges import compute_rest_edges
 from app.graphql_edges import compute_graphql_edges
 from app.models import Node, User, Workspace
 from app.ratelimit import limiter
+from app.schemas import CreateWorkspaceRequest, SetCredentialRequest
 from app.schema.graphql import GraphQLFetchError, GraphQLValidationError, fetch_introspection, parse_graphql
 from app.schema.openapi import OpenAPIFetchError, OpenAPIValidationError, extract_base_path, fetch_spec, parse_openapi
 
@@ -26,15 +27,11 @@ router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
 # behalf (2026-09-18 security-hardening plan) -- the same "backend fires
 # real outbound traffic" abuse shape as the request-proxy route below.
 @limiter.limit("10/minute")
-def create_workspace(request: Request, body: dict, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)) -> dict:
-    name = body.get("name")
-    schema_kind = body.get("schema_kind")
-    url = body.get("schema_source_url")
-    raw = body.get("raw_schema")
-    if not name or schema_kind not in ("openapi", "graphql"):
-        raise HTTPException(status_code=422, detail="name and schema_kind in ('openapi', 'graphql') are required")
-    if bool(url) == bool(raw):
-        raise HTTPException(status_code=422, detail="exactly one of schema_source_url or raw_schema is required")
+def create_workspace(request: Request, payload: CreateWorkspaceRequest, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)) -> dict:
+    name = payload.name
+    schema_kind = payload.schema_kind
+    url = payload.schema_source_url
+    raw = payload.raw_schema
 
     base_path = ""
     if schema_kind == "openapi":
@@ -129,14 +126,10 @@ def get_workspace(workspace_id: str, session: Session = Depends(get_session), cu
 
 
 @router.put("/{workspace_id}/credential", dependencies=[Depends(require_csrf)])
-def set_credential(workspace_id: str, body: dict, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)) -> dict:
+def set_credential(workspace_id: str, payload: SetCredentialRequest, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)) -> dict:
     workspace = get_owned_workspace(workspace_id, current_user, session)
-    header_name = body.get("header_name")
-    value = body.get("value")
-    if not header_name or not value:
-        raise HTTPException(status_code=422, detail="header_name and value are required")
-    workspace.credential_header_name = header_name
-    workspace.encrypted_credential = encrypt_credential(value)
+    workspace.credential_header_name = payload.header_name
+    workspace.encrypted_credential = encrypt_credential(payload.value)
     session.commit()
     return {"status": "ok"}
 
