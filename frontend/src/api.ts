@@ -79,6 +79,7 @@ export interface RequestHistoryEntry {
 export interface CurrentUser {
   id: string
   username: string
+  csrf_token: string
 }
 
 // Split-origin deploys (frontend and backend on different real domains,
@@ -91,15 +92,32 @@ const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
 
 export const GITHUB_LOGIN_URL = `${API_BASE}/api/auth/github/login`
 
+// The anti-CSRF double-submit token (2026-09-18 security-hardening plan,
+// backend/app/auth/dependencies.py::require_csrf): the backend's session
+// cookie is SameSite=None in production (required for this split-origin
+// deploy), which removes the CSRF protection SameSite=Lax would
+// otherwise give for free -- every mutating route now requires this
+// header to match the value the session itself carries. Held in module
+// state, not React state: every api.ts function needs it, and it has no
+// UI of its own to re-render for. Set once per real login (getCurrentUser),
+// cleared on logout so a stale value never outlives its session.
+let csrfToken: string | null = null
+
+function csrfHeaders(): Record<string, string> {
+  return csrfToken ? { 'X-CSRF-Token': csrfToken } : {}
+}
+
 export function getCurrentUser(): Promise<CurrentUser | null> {
   return fetch(`${API_BASE}/api/auth/me`, { credentials: 'include' }).then((res) => {
-    if (res.status === 401) return null
-    return json<CurrentUser>(res)
+    if (res.status === 401) { csrfToken = null; return null }
+    return json<CurrentUser>(res).then((user) => { csrfToken = user.csrf_token; return user })
   })
 }
 
 export function logout(): Promise<void> {
-  return fetch(`${API_BASE}/api/auth/logout`, { method: 'POST', credentials: 'include' }).then(() => undefined)
+  return fetch(`${API_BASE}/api/auth/logout`, {
+    method: 'POST', credentials: 'include', headers: csrfHeaders(),
+  }).then(() => { csrfToken = null })
 }
 
 async function json<T>(res: Response): Promise<T> {
@@ -121,7 +139,7 @@ export function createWorkspace(
       : { name, schema_kind: kind, raw_schema: source.rawSchema }
   return fetch(`${API_BASE}/api/workspaces`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...csrfHeaders() },
     body: JSON.stringify(body),
     credentials: 'include',
   }).then((res) => json<{ id: string; name: string; schema_kind: string; node_count: number }>(res))
@@ -144,7 +162,7 @@ export function sendRequest(
 ): Promise<SendResult> {
   return fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(workspaceId)}/requests`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...csrfHeaders() },
     body: JSON.stringify({ method, url, headers, body }),
     credentials: 'include',
   }).then((res) => json<SendResult>(res))
@@ -172,7 +190,7 @@ export function getWorkspaceRequests(workspaceId: string): Promise<RequestHistor
 export function setCredential(workspaceId: string, headerName: string, value: string): Promise<void> {
   return fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(workspaceId)}/credential`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...csrfHeaders() },
     body: JSON.stringify({ header_name: headerName, value }),
     credentials: 'include',
   }).then((res) => json<{ status: string }>(res)).then(() => undefined)
@@ -181,6 +199,7 @@ export function setCredential(workspaceId: string, headerName: string, value: st
 export function clearCredential(workspaceId: string): Promise<void> {
   return fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(workspaceId)}/credential`, {
     method: 'DELETE',
+    headers: csrfHeaders(),
     credentials: 'include',
   }).then((res) => json<{ status: string }>(res)).then(() => undefined)
 }

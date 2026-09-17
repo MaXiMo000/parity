@@ -6,12 +6,13 @@ authenticated GitHub user."""
 from __future__ import annotations
 
 import os
+import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_current_user, require_csrf
 from app.auth.github import GitHubOAuthError, build_authorize_url, exchange_code_for_token, fetch_github_user, new_state
 from app.db import get_session
 from app.models import User
@@ -70,16 +71,20 @@ def github_callback(request: Request, code: str, state: str, session: Session = 
     session.commit()
 
     request.session["user_id"] = user.id
+    # A fresh CSRF token per real login (2026-09-18 security-hardening
+    # plan) -- request.session.clear() on logout already wipes it, so a
+    # logged-out session has none to leak or reuse.
+    request.session["csrf_token"] = secrets.token_urlsafe(32)
     frontend_origin = os.environ.get("FRONTEND_ORIGIN", "http://localhost:5173")
     return RedirectResponse(frontend_origin)
 
 
 @router.get("/me")
-def auth_me(current_user: User = Depends(get_current_user)) -> dict:
-    return {"id": current_user.id, "username": current_user.username}
+def auth_me(request: Request, current_user: User = Depends(get_current_user)) -> dict:
+    return {"id": current_user.id, "username": current_user.username, "csrf_token": request.session.get("csrf_token")}
 
 
-@router.post("/logout")
+@router.post("/logout", dependencies=[Depends(require_csrf)])
 def logout(request: Request) -> dict:
     request.session.clear()
     return {"status": "ok"}

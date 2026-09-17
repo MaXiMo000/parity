@@ -7,6 +7,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import secrets
 
 import httpx
 import itsdangerous
@@ -57,16 +58,26 @@ def clean_db():
     ensure_default_user(SessionLocal())
 
 
-def login_as(client: TestClient, user_id: str) -> None:
+def login_as(client: TestClient, user_id: str) -> str:
     """Signs a real session cookie matching the app's own
     SESSION_SECRET_KEY -- verified directly against the real
     SessionMiddleware/itsdangerous behavior before this plan was
     written. Lets a test authenticate a TestClient without a real GitHub
     OAuth round-trip; every route that needs a real GitHub interaction
     (the login/callback routes themselves) is tested separately, with
-    respx mocking the real GitHub calls."""
+    respx mocking the real GitHub calls.
+
+    Also embeds a real csrf_token in the forged session (matching what a
+    real github_callback does, 2026-09-18 security-hardening plan) and
+    sets it as a default X-CSRF-Token header on `client` -- every
+    subsequent mutating call from this same client carries it
+    automatically, the same way a real logged-in browser would, so every
+    existing test written before CSRF protection existed keeps working
+    unchanged. Returns the token in case a test needs it directly (e.g.
+    to deliberately send a wrong one)."""
+    csrf_token = secrets.token_urlsafe(32)
     signer = itsdangerous.TimestampSigner(os.environ["SESSION_SECRET_KEY"])
-    payload = base64.b64encode(json.dumps({"user_id": user_id}).encode("utf-8"))
+    payload = base64.b64encode(json.dumps({"user_id": user_id, "csrf_token": csrf_token}).encode("utf-8"))
     signed = signer.sign(payload).decode("utf-8")
     # Deviation from the brief: `client.cookies.set("session", signed)`
     # stamps the cookie with domain="" (unspecified-but-literal-empty).
@@ -84,3 +95,5 @@ def login_as(client: TestClient, user_id: str) -> None:
         request=httpx.Request("GET", str(client.base_url)),
     )
     client.cookies.extract_cookies(fake_response)
+    client.headers["X-CSRF-Token"] = csrf_token
+    return csrf_token

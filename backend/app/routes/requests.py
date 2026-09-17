@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi import Request as FastAPIRequest
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import get_current_user, get_owned_workspace
+from app.auth.dependencies import get_current_user, get_owned_workspace, require_csrf
 from app.crypto import CredentialDecryptionError, decrypt_credential
 from app.db import get_session
 from app.drift.graphql import check_graphql_drift
@@ -37,7 +37,7 @@ def _safe_json(text: str | None) -> Any:
         return text
 
 
-@router.post("/{workspace_id}/requests", status_code=201)
+@router.post("/{workspace_id}/requests", status_code=201, dependencies=[Depends(require_csrf)])
 # 20/minute: this route fires a real outbound HTTP request through the
 # SSRF-guarded proxy on the caller's behalf -- the exact abuse shape
 # named in the 2026-09-18 security-hardening plan (a logged-in session

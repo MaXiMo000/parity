@@ -8,7 +8,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import get_current_user, get_owned_workspace
+from app.auth.dependencies import get_current_user, get_owned_workspace, require_csrf
 from app.crypto import encrypt_credential
 from app.db import get_session
 from app.edges import compute_rest_edges
@@ -21,7 +21,7 @@ from app.schema.openapi import OpenAPIFetchError, OpenAPIValidationError, extrac
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
 
 
-@router.post("", status_code=201)
+@router.post("", status_code=201, dependencies=[Depends(require_csrf)])
 # 10/minute: this route fetches a real remote schema URL on the caller's
 # behalf (2026-09-18 security-hardening plan) -- the same "backend fires
 # real outbound traffic" abuse shape as the request-proxy route below.
@@ -128,7 +128,7 @@ def get_workspace(workspace_id: str, session: Session = Depends(get_session), cu
     }
 
 
-@router.put("/{workspace_id}/credential")
+@router.put("/{workspace_id}/credential", dependencies=[Depends(require_csrf)])
 def set_credential(workspace_id: str, body: dict, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)) -> dict:
     workspace = get_owned_workspace(workspace_id, current_user, session)
     header_name = body.get("header_name")
@@ -141,7 +141,7 @@ def set_credential(workspace_id: str, body: dict, session: Session = Depends(get
     return {"status": "ok"}
 
 
-@router.delete("/{workspace_id}/credential")
+@router.delete("/{workspace_id}/credential", dependencies=[Depends(require_csrf)])
 def clear_credential(workspace_id: str, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)) -> dict:
     workspace = get_owned_workspace(workspace_id, current_user, session)
     workspace.credential_header_name = None
