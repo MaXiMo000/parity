@@ -107,7 +107,7 @@ export function App() {
         {error && <p className="idle-hint idle-hint--error">{error}</p>}
 
         {workspace && (
-          <Graph nodes={workspace.nodes} edges={workspace.edges} statuses={statuses} onSelect={setSelectedId} />
+          <Graph nodes={workspace.nodes} edges={workspace.edges} virtualNodes={workspace.virtual_nodes} statuses={statuses} onSelect={setSelectedId} />
         )}
       </div>
       <DetailPanel key={selected?.id ?? 'none'} workspace={workspace} node={selected} status={selectedId ? (statuses[selectedId] ?? 'unverified_no_schema') : 'unverified_no_schema'} onClose={handleClose} onSent={handleSent} />

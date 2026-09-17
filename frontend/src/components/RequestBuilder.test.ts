@@ -6,7 +6,7 @@ const baseWorkspace: Workspace = {
   id: 'w1', name: 'Test', schema_kind: 'openapi', base_path: '/api/v3',
   schema_source: 'https://petstore3.swagger.io/api/v3/openapi.json',
   has_credential: false, credential_header_name: null,
-  nodes: [], edges: [],
+  nodes: [], edges: [], virtual_nodes: [],
 }
 
 const restNode: Node = {

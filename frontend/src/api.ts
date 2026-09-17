@@ -18,6 +18,17 @@ export interface Edge {
   to_node: string
 }
 
+// Non-persisted, view-only graph landmarks (SPEC.md §8.3: "Query and
+// Mutation as roots, fields fanning out to the types they return") --
+// never a real, sendable API operation, so deliberately kept out of
+// `Node`/`nodes` rather than shoehorned in with null REST/GraphQL fields.
+// Always empty for an OpenAPI workspace.
+export interface VirtualNode {
+  id: string
+  label: string
+  kind: 'graphql_root' | 'graphql_type'
+}
+
 export interface Workspace {
   id: string
   name: string
@@ -28,6 +39,7 @@ export interface Workspace {
   credential_header_name: string | null
   nodes: Node[]
   edges: Edge[]
+  virtual_nodes: VirtualNode[]
 }
 
 export interface WorkspaceSummary {
