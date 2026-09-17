@@ -1,0 +1,73 @@
+# Render Blueprint (Phase 3c, SPEC.md §12): one managed Postgres, one
+# Python web service for the FastAPI backend, one static site for the
+# Vite frontend build -- the exact three pieces SPEC.md §12 names, no
+# more. Deploy with "New +" -> "Blueprint" in the Render dashboard,
+# pointed at this repo; Render reads this file and creates all three.
+#
+# Topology decision this file makes concrete (left open by Phase 3a's
+# HANDOFF): frontend and backend are two separate Render-assigned
+# subdomains (parity-frontend.onrender.com / parity-backend.onrender.com,
+# or your own custom domains once attached) -- a real split-origin
+# deploy, not same-origin. That's why FRONTEND_ORIGIN, VITE_API_BASE_URL,
+# and PARITY_ENV=production (SameSite=None + Secure cookies, CORS locked
+# to one real origin) all appear below: same-origin would need none of
+# them. See DEPLOY.md for the full narrative and the one-time manual
+# steps this file can't do for you (registering the GitHub OAuth app,
+# generating secrets).
+
+databases:
+  - name: parity-db
+    plan: free
+    databaseName: parity
+    user: parity
+
+services:
+  - type: web
+    name: parity-backend
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: "pip install -e . && alembic upgrade head"
+    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
+    envVars:
+      - key: PARITY_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: parity-db
+          property: connectionString
+      # Secrets and per-deploy values with no safe default -- set these
+      # in the Render dashboard after the first deploy (sync: false means
+      # "Render won't overwrite what you set manually"). See DEPLOY.md.
+      - key: SESSION_SECRET_KEY
+        sync: false
+      - key: FERNET_KEY
+        sync: false
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
+      - key: GITHUB_CALLBACK_URL
+        sync: false
+      - key: FRONTEND_ORIGIN
+        sync: false
+
+  - type: web
+    name: parity-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: "npm ci && npm run build"
+    staticPublishPath: dist
+    envVars:
+      # Baked into the built JS at build time (see frontend/src/api.ts) --
+      # set to the real parity-backend URL once it's known (Render
+      # assigns it on first deploy, or your own custom backend domain).
+      - key: VITE_API_BASE_URL
+        sync: false
+    routes:
+      # A client-side-routed SPA with exactly one real route (App.tsx has
+      # no router) -- this just prevents a hard 404 on a manual reload.
+      - type: rewrite
+        source: /*
+        destination: /index.html

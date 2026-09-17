@@ -926,3 +926,179 @@ decisions Phase 3a's own HANDOFF section left open — which real domains
 the frontend and backend will actually live on, and updating the
 frontend's currently-hardcoded relative `/api/...` paths accordingly so
 a split-origin deploy actually works.
+
+## 2026-09-17: Phase 3c: Deploy Readiness + Missing Public README — done, live-verified
+
+**What/Why**: Phase 3b left the product itself feature-complete for v1
+(both protocols, real auth, encrypted credentials) but genuinely
+undeployable — the frontend's `fetch` calls were hardcoded to relative
+`/api/...` paths (same-origin only), there was no Render blueprint, and
+`SPEC.md` §9's own folder structure names a public `README.md` that was
+never created despite Phases 0–3b all being real and live-verified. This
+phase closes all three, plus a smaller gap found while doing it: no
+`.env.example` existed on either side despite `.gitignore` already
+carrying a `!.env.example` carve-out for one.
+
+**What was built**:
+
+- **Split-origin API base URL** (`frontend/src/api.ts`): every `fetch`
+  call now goes through a module-level `API_BASE` constant read from
+  `import.meta.env.VITE_API_BASE_URL`, defaulting to `''` — same-origin
+  local dev is byte-for-byte unchanged (an empty prefix plus
+  `vite.config.ts`'s existing dev-proxy resolves `/api/...` exactly as
+  before), but a real split-origin deploy can now set one absolute
+  backend origin at build time. `frontend/src/vite-env.d.ts` (new)
+  declares the `ImportMetaEnv` augmentation so this type-checks under
+  `noUnusedLocals`/strict settings. Verified two ways: (1) `VITE_API_BASE_URL=https://parity-backend.onrender.com
+  npx vite build` followed by `grep`-ing the built JS for that literal
+  hostname — confirmed present, so the substitution is real, not just
+  type-checking; (2) a full live browser session with `VITE_API_BASE_URL`
+  *unset* (the local-dev path) — see below — confirming the fallback
+  doesn't regress the existing same-origin flow.
+- **`render.yaml`** (repo root): a Render Blueprint — one Python web
+  service (backend, `buildCommand` runs `alembic upgrade head` so
+  migrations are never a separate manual deploy step), one static site
+  (frontend), one managed Postgres. Makes the deploy-topology decision
+  Phase 3a's HANDOFF left open concrete: two separate `onrender.com`
+  subdomains (real split-origin), not one apex with two paths — which is
+  why `FRONTEND_ORIGIN`/`VITE_API_BASE_URL`/`PARITY_ENV=production` all
+  appear in it. No `Dockerfile`: Render's native Python/Node buildpacks
+  cover this stack directly (`pyproject.toml`/`package.json`), so a
+  Dockerfile would be extra surface with no real benefit — HANDOFF's own
+  prior "Next" wording named `Dockerfile` alongside `render.yaml` but
+  didn't mandate one if the buildpack path is real and sufficient, which
+  it is here.
+- **`DEPLOY.md`** (new): the one-time manual steps a blueprint can't do
+  (registering a *production* GitHub OAuth app, separate from any dev app
+  from `AUTH_SETUP.md`; generating `SESSION_SECRET_KEY`/`FERNET_KEY`),
+  the exact env-var fill-in table for both Render services, the
+  "deploy once, learn your real URLs, fill in the table, redeploy" order
+  of operations this two-service-referencing-each-other setup actually
+  requires, and a live-verification checklist for whoever completes the
+  one step this session can't (registering a real production OAuth app
+  needs a real account with a real domain to register against).
+- **`README.md`** (new, repo root): the public-facing doc `SPEC.md` §9
+  named as part of the folder structure since the beginning but which no
+  phase had actually written — what the project is, what's real right
+  now vs. explicitly not (linking `SPEC.md` §4 and this file's own gap
+  log rather than re-stating it and risking drift), stack, local dev,
+  and a pointer to `DEPLOY.md`.
+- **`.env.example`** (new, both `backend/` and `frontend/`): consolidates
+  every env var referenced across `AUTH_SETUP.md`, `DEPLOY.md`, and
+  `app/main.py`'s own startup checks into one real file per side, closing
+  a gap the repo's own `.gitignore` (`!.env.example`) had been silently
+  pointing at since before this phase.
+- **Visual-identity pass**: audited, not changed. Read every component's
+  `.tsx` and `styles.css` against the Phase 0 plan's fixed palette/type
+  tokens (`--ink`/`--paper`/`--mute`/`--hair`/`--match`/`--violate`,
+  Space Grotesk/IBM Plex Mono) — every screen (auth gate, workspace form,
+  detail panel, request builder, history panel, credential panel) already
+  uses the tokens consistently with no ad-hoc colors or fonts. Stated
+  honestly rather than inventing changes to justify this task: the "final
+  pass" **found nothing to change**. `SPEC.md` §13 deferred the *exact*
+  values to Phase 0, not a second design pass in Phase 3 — Phase 0's plan
+  already fixed them for good, and every phase since has held to them.
+
+### Verified
+
+- Backend: `cd backend && .venv/Scripts/python -m pytest -q` — **135
+  passed** against a real Postgres (this session's own native/portable
+  instance — see the environment note below, not the project's
+  `docker-compose.yml` — Docker Desktop would not come up on this
+  machine; see below). No backend code changed this phase, so this is a
+  regression check, not new coverage.
+- Frontend: `cd frontend && npx tsc -b` clean; `npx vitest run` — **15
+  passed across 4 test files** (unchanged from Phase 3b — the API_BASE
+  change has no unit-testable branch beyond what `nodeLabel`/`severity`
+  tests already cover); `npx vite build` — both with and without
+  `VITE_API_BASE_URL` set, both clean.
+- **Live-verified end to end in a real browser**, same manually-signed
+  session-cookie technique Phase 3b's own HANDOFF section used (no real
+  GitHub OAuth app registered in this environment — same standing gap
+  named below and in every phase since 3a):
+  - Backend on `:8123` (native Postgres, see below), frontend `npm run
+    dev` on `:5173`. Loading the app showed the real "Sign in with
+    GitHub" gate with `href="/api/auth/github/login"` — confirming
+    `API_BASE`'s empty-string local-dev fallback resolves to exactly the
+    same relative path as before this phase's change, not a regression.
+  - Signed in via a manually-crafted session cookie (matching
+    `tests/conftest.py`'s own `login_as` technique). Created a real
+    workspace ("Petstore Phase3c check") against
+    `https://petstore3.swagger.io/api/v3/openapi.json` — the real 3D
+    graph rendered with the same known ring layout every prior phase's
+    Petstore verification produced.
+  - Clicked the `loginUser` node, clicked Send with no edits: got a real
+    `200` from the live Petstore API
+    (`"Logged in user session: 2447803852618845664"`), and a real
+    `violated` drift finding (`response body is not valid JSON` — the
+    endpoint's declared schema says `{"type": "string"}` but a bare,
+    unquoted string isn't valid JSON on its own; a real, unforced finding
+    about Petstore's own spec/response mismatch, the same kind of
+    honest live-API finding Phase 2a's and Phase 3b's own verifications
+    reported, not an artifact of this phase's changes). The node turned
+    red in the 3D graph.
+  - Opened the workspace-wide History panel: it listed the one real
+    request just sent, with a real timestamp — confirming
+    `getWorkspaceRequests` (one of the routes now going through
+    `API_BASE`) still round-trips correctly.
+  - `uvicorn` and `npm run dev` were stopped after this verification
+    pass.
+
+### Environment note: this session's Postgres is native, not Docker
+
+`backend/docker-compose.yml` is unchanged and still the documented path
+for anyone with a working Docker install. In *this* session, Docker
+Desktop repeatedly failed to come up (the host has ~600MB free RAM at
+idle, per this portfolio's own `SETUP_STATUS.md` profile of this
+machine, and Docker Desktop's WSL2 backend did not survive more than a
+few minutes before its own process list went empty). Verification above
+used a native/portable Postgres 16 binary already present on this
+machine at `C:\tools\pgsql` (installed for the `recur` repo in an earlier
+session) — a `parity`/`parity` role and database were created inside that
+same running instance on port 5432, and `DATABASE_URL` pointed at it
+instead of the compose file's `5441`. This is the same "native Postgres,
+reused across repos" pattern this portfolio's own `SETUP_STATUS.md`
+already established for `recur`/`AI-Recipe-Maker`/`Quiz-App` on this
+machine, applied here for the same reason (Docker's resource footprint
+doesn't fit this host) — not a change to the project's own documented
+setup, which still correctly says `docker compose up -d` for anyone with
+Docker actually working. The native Postgres instance was left running
+after this session, matching every prior phase's "stop the app
+processes, leave the database running" convention.
+
+### What this phase explicitly does NOT cover
+
+- **No real production deploy was performed.** `render.yaml`/`DEPLOY.md`
+  are real, complete, and internally consistent with `app/main.py`'s
+  existing `PARITY_ENV`/CORS/session logic (read closely to confirm this,
+  not guessed), but nobody has clicked "New Blueprint" against a real
+  Render account, and no real production GitHub OAuth app exists. That
+  remains the one human step no session can complete unattended — the
+  same standing gap `AUTH_SETUP.md`/Phase 3a/3b's HANDOFF sections
+  already named for local dev, now with its production-deploy
+  counterpart in `DEPLOY.md`.
+- **No real cross-origin browser round trip was tested.** The API_BASE
+  substitution was verified at the build-artifact level (the real
+  hostname appears in the compiled JS) and the local-dev fallback was
+  verified live; a real two-different-real-domains fetch-with-credentials
+  round trip needs real HTTPS on both sides (`SameSite=None` cookies are
+  rejected by browsers without `Secure`, i.e. without HTTPS) — not
+  something this local environment can fake without also faking TLS,
+  which would test the fake, not the real thing. This is exactly what
+  step 4 of `DEPLOY.md`'s own verification checklist is for once a real
+  deploy exists.
+- Every gap already carried from Phase 2b/3a/3b (GraphQL's edge-less 3D
+  layout, host-blind request-matching, `call_count` not affecting node
+  size) is untouched by this phase — none of them are deploy- or
+  README-shaped, so none were in scope here.
+
+### Next
+
+No more named phases remain in `SPEC.md` §10's build order — Phase 3
+(accounts, credential storage, polish, deploy-readiness) is now fully
+addressed on paper and in code. What's left is exactly what this
+phase's own "does NOT cover" section says: someone with a real Render
+account and a real GitHub account needs to spend ~15 minutes clicking
+through `DEPLOY.md` once. After that, the carried-over gaps above (listed
+in full in Phase 2b's own HANDOFF section) are the real v2 backlog, not
+new work this repo's build order ever promised for v1.
