@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { nodeColor, type DriftStatus } from '../lib/severity'
+import { nodeRadius } from '../lib/nodeSize'
 import type { LaidOutNode } from './layout'
 
 export function Node({ node, status, onSelect }: {
@@ -17,7 +18,7 @@ export function Node({ node, status, onSelect }: {
       onPointerOver={(e) => { e.stopPropagation(); setHovered(true); document.body.style.cursor = 'pointer' }}
       onPointerOut={() => { setHovered(false); document.body.style.cursor = 'auto' }}
     >
-      <sphereGeometry args={[0.55, 24, 24]} />
+      <sphereGeometry args={[nodeRadius(node.call_count), 24, 24]} />
       <meshStandardMaterial
         color={color}
         emissive={color}
